@@ -2,7 +2,7 @@
 // P7 · E2E-10 — real device profiles (iPhone / iPad). Layout + real touch input.
 // Runs against the actual game with the real-time loop (no freeze).
 const { test, expect } = require('@playwright/test');
-const { openGame } = require('./helpers');
+const { openGame, enterPlayPanel } = require('./helpers');
 
 test('layout: no horizontal page scroll; canvas + controls fit the viewport', async ({ page }) => {
   await openGame(page, { seed: 1 });
@@ -28,6 +28,8 @@ test('layout: no horizontal page scroll; canvas + controls fit the viewport', as
 
 test('real touch: PLAY starts, jump button lifts the hero, right button moves it', async ({ page }) => {
   await openGame(page, { seed: 1 });
+  await page.locator('#slots .slot-card').first().tap();        // pick a save slot
+  await page.waitForSelector('#play-panel:not(.hidden)');
   await page.locator('#play-btn').tap();                        // real touch tap
   await page.waitForFunction(() => window.BS.scene() === 'INTRO');
   // advance the intro by tapping the canvas
@@ -53,7 +55,7 @@ test('real touch: PLAY starts, jump button lifts the hero, right button moves it
 
 test('audio unlocks on the first real touch', async ({ page }) => {
   await openGame(page);
-  await page.locator('#play-btn').tap();
+  await page.locator('#slots .slot-card').first().tap();       // first gesture unlocks audio
   await page.waitForFunction(() => window.BS.audioState() === 'running');
   expect(await page.evaluate(() => window.BS.audioState())).toBe('running');
 });

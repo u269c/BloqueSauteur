@@ -40,6 +40,7 @@
     background:rgba(6,8,18,0.72);
   }
   .overlay.hidden { display:none; }
+  .hidden { display:none !important; }
   .overlay h1 { font-size:min(11vmin,74px); letter-spacing:.06em; color:#f4d03f; text-shadow:3px 3px 0 #d63031; }
   .overlay p  { font-size:min(4.4vmin,22px); color:#b6c2c6; max-width:32ch; line-height:1.5; }
   .overlay .hint { font-size:min(3.6vmin,17px); color:#7a8a90; }
@@ -92,7 +93,32 @@
     border-radius:10px; cursor:pointer;
   }
   .mode-btn.sel { color:#101018; background:#eee8d5; border-color:#fff; }
-  .mode-btn.rage.sel { background:#e0392f; color:#fff; border-color:#ff6a5a; }
+  /* distinct per-mode tints so the choices read at a glance */
+  .mode-btn.easy   { border-color:#7cb342; color:#a6d977; }
+  .mode-btn.normal { border-color:#39a0ed; color:#8fcdf5; }
+  .mode-btn.rage   { border-color:#e0392f; color:#f19086; }
+  .mode-btn.easy.sel   { background:#7cb342; color:#0d1a06; }
+  .mode-btn.normal.sel { background:#39a0ed; color:#04121d; }
+  .mode-btn.rage.sel   { background:#e0392f; color:#fff; border-color:#ff6a5a; }
+  .mode-desc { font-size:min(3.3vmin,14px); color:#93a1a1; max-width:34ch; min-height:2.6em; line-height:1.3; }
+
+  /* Colour picker row with live hero preview */
+  .picker-row { display:flex; align-items:center; gap:2.4vmin; }
+  #hero-preview { width:auto; height:min(14vmin,64px); image-rendering:pixelated; background:rgba(255,255,255,0.06); border:2px solid rgba(255,255,255,0.18); border-radius:8px; padding:2px; }
+
+  /* Save slots */
+  .slots { display:flex; gap:2vmin; flex-wrap:wrap; justify-content:center; }
+  .slot-card {
+    position:relative; width:min(38vw,180px); padding:2.2vmin; cursor:pointer; text-align:left;
+    background:rgba(255,255,255,0.06); border:2px solid rgba(255,255,255,0.2); border-radius:12px; color:#eee8d5;
+  }
+  .slot-card:hover { background:rgba(255,255,255,0.12); border-color:#f4d03f; }
+  .slot-card .slot-name { font-weight:700; font-size:min(4.4vmin,20px); color:#f4d03f; }
+  .slot-card .slot-sum { font-size:min(3.2vmin,13px); color:#b6c2c6; margin-top:.5em; line-height:1.4; }
+  .slot-card .slot-del { position:absolute; top:6px; right:8px; color:#93a1a1; font-size:min(3.6vmin,16px); background:none; border:none; cursor:pointer; }
+  .slot-card .slot-del:hover { color:#e0392f; }
+  .slot-back { align-self:flex-start; background:none; border:none; color:#93a1a1; font-size:min(3.6vmin,16px); cursor:pointer; padding:0 0 1vmin; }
+  .slot-back:hover { color:#eee8d5; }
 </style>
 </head>
 <body>
@@ -113,12 +139,25 @@
 
   <div class="overlay" id="start">
     <h1>BLOQUE&nbsp;SAUTEUR</h1>
-    <p>Survive the tower. Stomp the monsters into the lava.</p>
-    <div class="picker-label">Mode</div>
-    <div class="modes" id="modes"></div>
-    <div class="picker-label">Your colour</div>
-    <div class="swatches" id="swatches"></div>
-    <button class="play-btn" id="play-btn">▶ PLAY</button>
+
+    <div id="slot-panel">
+      <p>Choose a save slot.</p>
+      <div class="slots" id="slots"></div>
+    </div>
+
+    <div id="play-panel" class="hidden">
+      <button class="slot-back" id="slot-back">◀ slots</button>
+      <div class="picker-label">Mode</div>
+      <div class="modes" id="modes"></div>
+      <p class="mode-desc" id="mode-desc"></p>
+      <div class="picker-label">Your colour</div>
+      <div class="picker-row">
+        <canvas id="hero-preview" width="24" height="30" aria-label="hero preview"></canvas>
+        <div class="swatches" id="swatches"></div>
+      </div>
+      <button class="play-btn" id="play-btn">▶ PLAY</button>
+    </div>
+
     <p class="hint">Arrow keys ← → move, ↑ jump &nbsp;·&nbsp; or the on-screen buttons</p>
     <p class="version" id="version"></p>
   </div>
@@ -367,6 +406,8 @@ const Game = {
   spawnT: 0,                     // countdown to next spawn
   bossActive: false,            // regular spawns pause during the boss
   points: 0,
+  owned: { shield: false, doubleJump: false, dodge: false, costume: false },   // from the active slot
+  heartsBought: 0,
   particles: [],
   shakeT: 0, shakeMag: 0,
   sceneT: 0,                     // time in the current transient scene (INTRO/CLEAR/…)
@@ -386,26 +427,49 @@ const Game = {
 };
 
 // ── Persistence (localStorage) ────────────────────────────────────
+// Persistent progress lives in one of 3 save slots (localStorage). Muted is global.
+function freshSlot() {
+  return { points: 0, owned: { shield: false, doubleJump: false, dodge: false, costume: false }, heartsBought: 0, rainbowUnlocked: false, colorIdx: 0, mode: 'normal', best: 0 };
+}
 const Save = {
   KEY: 'bloquesauteur.save',
+  data: { activeSlot: null, slots: [null, null, null], muted: false },
   load() {
-    let d = {};
-    try { d = JSON.parse(localStorage.getItem(this.KEY) || '{}') || {}; } catch (e) { d = {}; }
-    Game.hero.colorIdx = Number.isInteger(d.colorIdx) ? d.colorIdx : 0;
-    Game.rainbowUnlocked = !!d.rainbowUnlocked;
-    Game.best = d.best | 0;
-    Audio.muted = !!d.muted;
-    if (MODES[d.mode]) Game.mode = d.mode;
-    // never leave the hero on rainbow if it isn't unlocked yet
+    let d = null;
+    try { d = JSON.parse(localStorage.getItem(this.KEY) || 'null'); } catch (e) { d = null; }
+    if (d && Array.isArray(d.slots)) this.data = { activeSlot: null, slots: [d.slots[0] || null, d.slots[1] || null, d.slots[2] || null], muted: !!d.muted };
+    else this.data = { activeSlot: null, slots: [null, null, null], muted: false };
+    Audio.muted = this.data.muted;
+  },
+  slot(i) { return this.data.slots[i]; },
+  // Activate slot i (creating it if empty) and copy its progress into Game.
+  select(i) {
+    if (!this.data.slots[i]) this.data.slots[i] = freshSlot();
+    this.data.activeSlot = i;
+    const s = this.data.slots[i];
+    Game.points = s.points | 0;
+    Game.owned = Object.assign({ shield: false, doubleJump: false, dodge: false, costume: false }, s.owned);
+    Game.heartsBought = s.heartsBought | 0;
+    Game.rainbowUnlocked = !!s.rainbowUnlocked;
+    Game.best = s.best | 0;
+    Game.mode = MODES[s.mode] ? s.mode : 'normal';
+    Game.hero.colorIdx = Number.isInteger(s.colorIdx) ? s.colorIdx : 0;
     if (PALETTE[Game.hero.colorIdx] && PALETTE[Game.hero.colorIdx].rainbow && !Game.rainbowUnlocked) Game.hero.colorIdx = 0;
+    this.save();
   },
+  // Write Game's current progress back into the active slot + persist.
   save() {
-    try {
-      localStorage.setItem(this.KEY, JSON.stringify({
-        colorIdx: Game.hero.colorIdx, rainbowUnlocked: Game.rainbowUnlocked, best: Game.best, muted: Audio.muted, mode: Game.mode,
-      }));
-    } catch (e) { /* private mode / quota — ignore */ }
+    const i = this.data.activeSlot;
+    if (i != null) {
+      this.data.slots[i] = {
+        points: Game.points | 0, owned: Game.owned || {}, heartsBought: Game.heartsBought | 0,
+        rainbowUnlocked: !!Game.rainbowUnlocked, colorIdx: Game.hero.colorIdx, mode: Game.mode, best: Game.best | 0,
+      };
+    }
+    this.data.muted = Audio.muted;
+    try { localStorage.setItem(this.KEY, JSON.stringify(this.data)); } catch (e) { /* private mode / quota */ }
   },
+  del(i) { this.data.slots[i] = null; if (this.data.activeSlot === i) this.data.activeSlot = null; this.save(); },
 };
 
 function reseed(seed) {
@@ -501,6 +565,7 @@ function initInput() {
   // Title / pause / HUD buttons
   const on = (id, fn) => document.getElementById(id).addEventListener('click', (e) => { e.preventDefault(); onFirstGesture(); fn(); });
   on('play-btn', () => startGame());
+  on('slot-back', () => showSlotPanel());
   on('resume-btn', () => togglePause(false));
   on('quit-btn', () => quitToTitle());
   on('pause-btn', () => { if (Game.scene === 'PLAY') togglePause(); });
@@ -512,8 +577,7 @@ function initInput() {
     if (Game.scene === 'INTRO' || Game.scene === 'CLEAR' || Game.scene === 'GAMEOVER' || Game.scene === 'VICTORY') { e.preventDefault(); tapAdvance(); }
   });
 
-  buildSwatches();
-  buildModes();
+  showTitlePanel();
   updateHudButtons();
   const v = document.getElementById('version'); if (v) v.textContent = VERSION;
 }
@@ -538,23 +602,75 @@ function buildSwatches() {
       b.addEventListener('click', (e) => {
         e.preventDefault(); onFirstGesture();
         if (p.rainbow && !Game.rainbowUnlocked) return;   // locked until level 4
-        Game.hero.colorIdx = i; Save.save(); buildSwatches();
+        Game.hero.colorIdx = i; Save.save(); buildSwatches(); drawHeroPreview();
       });
       box.appendChild(b);
     });
   }
 }
 
+const MODE_DESC = {
+  easy: 'Relaxed. Monster hits are harmless — only falling in the hazard costs a heart. Weakest bosses.',
+  normal: 'The real deal. A hit chips ¼ heart; clear a level flawlessly for a bonus heart. Bosses 3→6 HP.',
+  rage: 'Brutal. TWO spawn boxes; a hit costs ½ heart AND −1 point; no flawless bonus. Bosses 6→12 HP.',
+};
 function buildModes() {
   const box = document.getElementById('modes'); if (!box) return;
   box.innerHTML = '';
   for (const key of ['easy', 'normal', 'rage']) {
     const b = document.createElement('button');
-    b.className = 'mode-btn' + (key === 'rage' ? ' rage' : '') + (key === Game.mode ? ' sel' : '');
+    b.className = 'mode-btn ' + key + (key === Game.mode ? ' sel' : '');
     b.textContent = MODES[key].name;
     b.addEventListener('click', (e) => { e.preventDefault(); onFirstGesture(); Game.mode = key; Save.save(); buildModes(); });
     box.appendChild(b);
   }
+  const d = document.getElementById('mode-desc'); if (d) d.textContent = MODE_DESC[Game.mode] || '';
+}
+
+// ── Save-slot menu ──
+function slotSummary(s) {
+  if (!s) return 'Empty · New Game';
+  const skills = ['shield', 'doubleJump', 'dodge', 'costume'].filter((k) => s.owned && s.owned[k]).length;
+  return 'Best: LV' + (s.best || 0) + '  ·  ' + (s.points | 0) + ' pts\n' + skills + ' item' + (skills === 1 ? '' : 's') + '  ·  ' + (MODES[s.mode] ? MODES[s.mode].name : 'NORMAL');
+}
+function buildSlots() {
+  const box = document.getElementById('slots'); if (!box) return;
+  box.innerHTML = '';
+  for (let i = 0; i < 3; i++) {
+    const s = Save.slot(i);
+    const card = document.createElement('div'); card.className = 'slot-card';
+    const name = document.createElement('div'); name.className = 'slot-name'; name.textContent = 'SLOT ' + (i + 1);
+    const sum = document.createElement('div'); sum.className = 'slot-sum'; sum.textContent = slotSummary(s);
+    card.appendChild(name); card.appendChild(sum);
+    if (s) {
+      const del = document.createElement('button'); del.className = 'slot-del'; del.textContent = '✕'; del.setAttribute('aria-label', 'delete slot ' + (i + 1));
+      del.addEventListener('click', (e) => { e.stopPropagation(); e.preventDefault(); Save.del(i); buildSlots(); });
+      card.appendChild(del);
+    }
+    card.addEventListener('click', (e) => { e.preventDefault(); onFirstGesture(); selectSlot(i); });
+    box.appendChild(card);
+  }
+}
+function selectSlot(i) {
+  Save.select(i);
+  buildSwatches(); buildModes(); drawHeroPreview();
+  showPlayPanel();
+}
+function showSlotPanel() { buildSlots(); document.getElementById('slot-panel').classList.remove('hidden'); document.getElementById('play-panel').classList.add('hidden'); }
+function showPlayPanel() { document.getElementById('slot-panel').classList.add('hidden'); document.getElementById('play-panel').classList.remove('hidden'); }
+function showTitlePanel() { if (Save.data.activeSlot != null) { buildSwatches(); buildModes(); drawHeroPreview(); showPlayPanel(); } else showSlotPanel(); }
+
+function drawHeroPreview() {
+  const cv = document.getElementById('hero-preview'); if (!cv) return;
+  const c = cv.getContext('2d'); c.clearRect(0, 0, cv.width, cv.height);
+  const p = PALETTE[Game.hero.colorIdx];
+  const col = (p && p.rainbow) ? 'hsl(200 90% 62%)' : (p && p.css) || '#39a0ed';
+  const x = 6, y = 5, w = 12, h = 16;
+  c.fillStyle = '#0a0a0a'; c.fillRect(x + 1, y + h - 2, 3, 4); c.fillRect(x + w - 4, y + h - 2, 3, 4);
+  c.fillRect(x, y, w, h - 2);
+  c.fillStyle = col; c.fillRect(x + 2, y + 2, w - 4, 3); c.fillRect(x + (w >> 1) - 1, y + 2, 3, h - 8);
+  c.fillStyle = 'rgba(255,255,255,0.22)'; c.fillRect(x + 2, y + 2, w - 4, 1);
+  c.fillStyle = '#fff'; c.fillRect(x + w - 4, y + 6, 2, 2);
 }
 
 function updateHudButtons() {
@@ -668,8 +784,11 @@ const Audio = {
 // Scenes: TITLE → INTRO → PLAY → (boss) → CLEAR → INTRO/… → VICTORY;  PLAY→GAMEOVER on 0 lives.
 function firstGesture() { Audio.ensure(); }   // unlock audio on the very first gesture
 
-function startGame() {                         // TITLE → level 1
-  Game.level = 1; Game.hp = CONFIG.LIVES_START; Game.points = 0;
+function maxHearts() { return CONFIG.LIVES_START + (Game.heartsBought | 0); }
+function startGame() {                         // TITLE → level 1 (points carry from the slot)
+  // Safety: ensure a slot is active without clobbering current Game choices (mode/colour).
+  if (Save.data.activeSlot == null) { Save.data.activeSlot = 0; if (!Save.data.slots[0]) Save.data.slots[0] = freshSlot(); Save.save(); }
+  Game.level = 1; Game.hp = maxHearts();
   reseed(pickSeed());
   hideOverlay('start');
   Audio.sfx('start');
@@ -708,7 +827,7 @@ function afterClear() {
 function onGameOver() { Game.scene = 'GAMEOVER'; Game.sceneT = 0; Audio.stopMusic(); Audio.playMusic('gameover'); }
 function gotoTitle() {
   Game.scene = 'TITLE'; Game.paused = false; Audio.stopMusic(); Audio.playMusic('title');
-  showOverlay('start'); hideOverlay('pause');
+  showOverlay('start'); hideOverlay('pause'); showTitlePanel();
 }
 
 // Tap / key on a transient screen advances it.

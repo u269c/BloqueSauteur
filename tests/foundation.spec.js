@@ -2,7 +2,7 @@
 // P1 foundation acceptance tests. Each assertion pairs a positive check with a
 // negative control so a passing test can't be vacuously true.
 const { test, expect } = require('@playwright/test');
-const { openGame } = require('./helpers');
+const { openGame, enterPlayPanel } = require('./helpers');
 
 test.describe('P1 · RNG determinism', () => {
   test('same seed → identical sequence; different seed → different (neg. control)', async ({ page }) => {
@@ -83,6 +83,7 @@ test.describe('P1 · audio unlock on gesture', () => {
   test('pressing PLAY resumes the AudioContext and starts the level intro', async ({ page }) => {
     await openGame(page);
     expect(await page.evaluate(() => window.BS.audioState())).toBe('none'); // not yet created
+    await enterPlayPanel(page);            // pick a save slot to reach the play panel
     await page.locator('#play-btn').click();
     await page.waitForFunction(() => window.BS.audioState() === 'running');
     expect(await page.evaluate(() => window.BS.audioState())).toBe('running');

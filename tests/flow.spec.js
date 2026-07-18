@@ -1,7 +1,7 @@
 // @ts-check
 // P6 flow / UI / audio / persistence acceptance tests + cross-cutting e2e journeys.
 const { test, expect } = require('@playwright/test');
-const { openGame, gameUrl } = require('./helpers');
+const { openGame, gameUrl, enterPlayPanel } = require('./helpers');
 
 test.describe('P6 · scene flow', () => {
   test('E2E: title → play → boss → clear → level 2 (no-hit bonus)', async ({ page }) => {
@@ -107,28 +107,29 @@ test.describe('P6 · pause lifecycle', () => {
 });
 
 test.describe('P6 · colour picker + persistence', () => {
-  test('E2E: choosing a colour persists across reload; rainbow locked until L4', async ({ page }) => {
+  test('E2E: colour persists in the slot across reload; rainbow locked until L4', async ({ page }) => {
     await openGame(page);
-    // rainbow (last swatch) is locked initially
+    await enterPlayPanel(page);                       // slot 0 → play panel
     const swatches = page.locator('#swatches .swatch');
-    await expect(swatches.last()).toHaveClass(/locked/);
-    // pick orange (index 4)
-    await swatches.nth(4).click();
+    await expect(swatches.last()).toHaveClass(/locked/);   // rainbow locked
+    await swatches.nth(4).click();                    // pick orange
     expect(await page.evaluate(() => window.BS.hero().colorIdx)).toBe(4);
-    // reload — persisted
+    // reload → re-select the same slot → colour restored
     await page.reload(); await page.waitForFunction(() => !!window.BS);
+    await enterPlayPanel(page);
     expect(await page.evaluate(() => window.BS.hero().colorIdx)).toBe(4);
 
-    // unlock rainbow (reach L4) and persist
-    await page.evaluate(() => { const st = window.BS.state(); st.rainbowUnlocked = true; window.BS.Save.save(); window.BS.buildSwatches(); });
+    // unlock rainbow, persist to the slot
+    await page.evaluate(() => { window.BS.state().rainbowUnlocked = true; window.BS.Save.save(); window.BS.buildSwatches(); });
     await expect(page.locator('#swatches .swatch').last()).not.toHaveClass(/locked/);
     await page.reload(); await page.waitForFunction(() => !!window.BS);
-    await expect(page.locator('#swatches .swatch').last()).not.toHaveClass(/locked/);   // stays unlocked
+    await enterPlayPanel(page);
+    await expect(page.locator('#swatches .swatch').last()).not.toHaveClass(/locked/);   // still unlocked
   });
 
-  test('mute toggle persists across reload', async ({ page }) => {
+  test('mute toggle persists across reload (global, not per-slot)', async ({ page }) => {
     await openGame(page);
-    await page.locator('#play-btn').click();      // leave the title so the topbar is clickable
+    await enterPlayPanel(page); await page.locator('#play-btn').click();   // start → topbar clickable
     await page.locator('#mute-btn').click();
     expect(await page.evaluate(() => window.BS.muted())).toBe(true);
     await page.reload(); await page.waitForFunction(() => !!window.BS);
