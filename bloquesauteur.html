@@ -105,8 +105,11 @@ const CONFIG = {
   PLAT_X0: 64, PLAT_X1: 416,         // platform span (off either edge = lava)
   LAVA_Y: 232,                       // lava surface level
   SPAWN_X: 396, SPAWN_Y: 92,         // spawner cube centre
-  // Physics (tuned properly in P3/P7; placeholder-friendly here)
-  GRAVITY: 900, MOVE_SPEED: 96, JUMP_V: 330,
+  // Hero physics (feel-tuned in P7). Variable jump via 3-phase gravity.
+  RUN_SPEED: 112, GROUND_ACCEL: 1200, AIR_ACCEL: 700, GROUND_FRICTION: 1500,
+  JUMP_V: 300, G_HELD: 940, G_CUT: 2600, G_FALL: 1050, MAX_FALL: 520,
+  COYOTE: 0.08, JUMP_BUFFER: 0.10,
+  HURT_IFRAMES: 1.0, KNOCKBACK: 155, KNOCK_LOCK: 0.18,
   // Terrain contract: generator guarantees holes ≤ MAX_JUMP_GAP and vertical
   // steps ≤ JUMP_MAX_H; hero physics (P3) must be able to clear both.
   MAX_JUMP_GAP: 48,                  // 3 tiles — widest hole the hero can clear
@@ -229,16 +232,35 @@ const Game = {
   level: 1,
   lives: CONFIG.LIVES_START,
   terrain: null,
-  // Placeholder hero (real physics arrives in P3) — proves loop↔input↔render.
-  hero: { x: 240, y: CONFIG.PLAT_Y, vx: 0, vy: 0, w: 14, h: 18, onGround: true, face: 1, colorIdx: 0 },
+  hitThisLevel: false,           // cleared per level; drives the no-hit +1 life bonus
+  hero: {
+    x: 240, y: CONFIG.PLAT_Y, vx: 0, vy: 0, w: 12, h: 16, face: 1, colorIdx: 0,
+    onGround: true, coyote: 0, jumpBuf: 0, jumping: false,
+    hurt: 0,        // hurt-invulnerability timer (i-frames)
+    knock: 0,       // control-lock during knockback
+    ghost: 0,       // respawn ghostly-invincibility timer (enemies pass through)
+    dead: false,
+  },
   fps: 0,
 };
 
 function reseed(seed) { Game.seed = seed >>> 0; Game.rand = mulberry32(Game.seed); buildLevel(); }
 function buildLevel() {
   Game.terrain = genTerrain(Game.level, Game.seed);
+  Game.hitThisLevel = false;
   const sx = findSafeX(Game.terrain);
-  Object.assign(Game.hero, { x: sx, y: surfaceAt(Game.terrain, sx) ?? CONFIG.PLAT_Y, vx: 0, vy: 0, onGround: true });
+  Object.assign(Game.hero, {
+    x: sx, y: surfaceAt(Game.terrain, sx) ?? CONFIG.PLAT_Y, vx: 0, vy: 0,
+    onGround: true, coyote: 0, jumpBuf: 0, jumping: false, hurt: 0, knock: 0, ghost: 0, dead: false,
+  });
+}
+function respawnHero() {
+  const t = Game.terrain, sx = findSafeX(t);
+  Object.assign(Game.hero, {
+    x: sx, y: surfaceAt(t, sx) ?? CONFIG.PLAT_Y, vx: 0, vy: 0,
+    onGround: true, coyote: 0, jumpBuf: 0, jumping: false, hurt: 0, knock: 0, dead: false,
+    ghost: CONFIG.RESPAWN_GHOST,        // 2s ghostly invincibility — enemies pass through
+  });
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -334,7 +356,10 @@ const Audio = {
     const n = this.noteToFreq.bind(this), t0 = this.ctx.currentTime;
     switch (name) {
       case 'start': this.blip(n('C5'), .09, 'square', .4, t0); this.blip(n('G5'), .12, 'square', .4, t0 + .1); break;
-      case 'jump':  this.blip(n('E5'), .09, 'square', .35, t0); this.blip(n('B5'), .07, 'square', .3, t0 + .05); break;
+      case 'jump':  this.blip(n('E5'), .08, 'square', .32, t0); this.blip(n('B5'), .06, 'square', .28, t0 + .05); break;
+      case 'hurt':  this.blip(n('A3'), .16, 'sawtooth', .4, t0); this.blip(n('E3'), .18, 'sawtooth', .35, t0 + .04); break;
+      case 'die':   this.blip(n('G4'), .12, 'square', .4, t0); this.blip(n('D4'), .12, 'square', .4, t0 + .1); this.blip(n('G3'), .3, 'square', .4, t0 + .2); break;
+      case 'land':  this.blip(n('C4'), .04, 'square', .18, t0); break;
       default:      this.blip(n('A4'), .06, 'square', .3, t0);
     }
   },
@@ -366,28 +391,110 @@ function togglePause() {
 //  UPDATE — fixed-timestep simulation (dt is constant = CONFIG.DT)
 //  Placeholder hero kinematics; replaced by real physics in P3.
 // ══════════════════════════════════════════════════════════════════
+function approach(cur, target, maxDelta) {
+  if (cur < target) return Math.min(cur + maxDelta, target);
+  if (cur > target) return Math.max(cur - maxDelta, target);
+  return cur;
+}
+
+// Solid ground top at column index, or null (hole / off-platform).
+function colTop(ter, ci) {
+  if (ci < 0 || ci >= ter.nCols) return null;
+  return ter.cols[ci];
+}
+
+// AABB vs terrain columns, axis-separated. Hero.y is the feet (bottom) y.
+function collideHero(h, dt) {
+  const ter = Game.terrain, T = ter.colW, C = CONFIG;
+  // ── horizontal ──
+  h.x += h.vx * dt;
+  {
+    const l = h.x - h.w / 2, r = h.x + h.w / 2, top = h.y - h.h, bot = h.y;
+    const ci0 = Math.floor((l - ter.x0) / T), ci1 = Math.floor((r - ter.x0) / T);
+    for (let ci = ci0; ci <= ci1; ci++) {
+      const ct = colTop(ter, ci); if (ct == null) continue;      // hole / off-platform: no wall (can fall in)
+      // A column is a wall only if the hero's feet are below its top (walking into a step/hill side).
+      if (bot > ct + 0.5 && top < C.H) {
+        const cx0 = ter.x0 + ci * T, cx1 = cx0 + T;
+        if (h.vx > 0 && r > cx0 && l < cx0) { h.x = cx0 - h.w / 2; h.vx = 0; }
+        else if (h.vx < 0 && l < cx1 && r > cx1) { h.x = cx1 + h.w / 2; h.vx = 0; }
+      }
+    }
+  }
+  // ── vertical ──
+  h.y += h.vy * dt;
+  h.onGround = false;
+  if (h.vy >= 0) {
+    const l = h.x - h.w / 2, r = h.x + h.w / 2 - 0.001;
+    const ci0 = Math.floor((l - ter.x0) / T), ci1 = Math.floor((r - ter.x0) / T);
+    let gy = null;
+    for (let ci = ci0; ci <= ci1; ci++) { const ct = colTop(ter, ci); if (ct != null && (gy == null || ct < gy)) gy = ct; }
+    if (gy != null && h.y >= gy) { h.y = gy; h.vy = 0; h.onGround = true; }
+  }
+}
+
+function heroDie() {
+  const h = Game.hero; if (h.dead) return;
+  h.dead = true;
+  Game.hitThisLevel = true;
+  Game.lives--;
+  Audio.sfx('die');
+  if (Game.lives <= 0) { Game.lives = 0; onGameOver(); return; }   // GAME_OVER handled in P6
+  respawnHero();
+}
+
+// Enemy/boss contact hurts the hero (called from P4/P5). Returns true if it landed.
+function heroHurt(fromRight) {
+  const h = Game.hero, C = CONFIG;
+  if (h.ghost > 0 || h.hurt > 0 || h.dead) return false;          // ghostly / i-frames → immune
+  h.hurt = C.HURT_IFRAMES; h.knock = C.KNOCK_LOCK;
+  h.vx = (fromRight ? -1 : 1) * C.KNOCKBACK;                       // knocked away (toward left lava if hit from the right)
+  h.vy = -140; h.onGround = false;
+  Game.hitThisLevel = true;
+  Audio.sfx('hurt');
+  return true;
+}
+
+function onGameOver() { /* full flow in P6 */ }
+
 function update(dt) {
   Game.t += dt;
-  if (Game.scene !== 'PLAY') return;
+  if (Game.scene !== 'PLAY' || dt === 0) return;
   const h = Game.hero, C = CONFIG;
 
-  h.vx = (Input.right ? 1 : 0) * C.MOVE_SPEED - (Input.left ? 1 : 0) * C.MOVE_SPEED;
-  if (h.vx > 0) h.face = 1; else if (h.vx < 0) h.face = -1;
+  // timers
+  if (h.hurt > 0) h.hurt = Math.max(0, h.hurt - dt);
+  if (h.ghost > 0) h.ghost = Math.max(0, h.ghost - dt);
+  if (h.knock > 0) h.knock = Math.max(0, h.knock - dt);
+  h.coyote = h.onGround ? C.COYOTE : Math.max(0, h.coyote - dt);
+  h.jumpBuf = Input.consumeJump() ? C.JUMP_BUFFER : Math.max(0, h.jumpBuf - dt);
 
-  if (Input.consumeJump() && h.onGround) { h.vy = -C.JUMP_V; h.onGround = false; Audio.sfx('jump'); }
-  h.vy += C.GRAVITY * dt;
+  // horizontal control (suppressed briefly during knockback)
+  if (h.knock <= 0) {
+    const dir = (Input.right ? 1 : 0) - (Input.left ? 1 : 0);
+    const target = dir * C.RUN_SPEED;
+    const rate = (h.onGround ? (dir ? C.GROUND_ACCEL : C.GROUND_FRICTION) : C.AIR_ACCEL) * dt;
+    h.vx = approach(h.vx, target, rate);
+    if (dir !== 0) h.face = dir;
+  }
 
-  h.x += h.vx * dt;
-  h.y += h.vy * dt;
+  // jump (with coyote time + input buffer)
+  if (h.jumpBuf > 0 && (h.onGround || h.coyote > 0)) {
+    h.vy = -C.JUMP_V; h.onGround = false; h.coyote = 0; h.jumpBuf = 0; h.jumping = true;
+    Audio.sfx('jump');
+  }
 
-  // Placeholder collision: rest on the terrain surface if there is ground under
-  // the hero; otherwise fall (holes). Real AABB physics arrives in P3.
-  const surf = surfaceAt(Game.terrain, h.x);
-  if (surf != null && h.y >= surf) { h.y = surf; h.vy = 0; h.onGround = true; }
-  else h.onGround = false;
-  if (h.x < C.PLAT_X0 + 8) h.x = C.PLAT_X0 + 8;      // world walls (P3 adds real edge/hole death)
-  if (h.x > C.PLAT_X1 - 8) h.x = C.PLAT_X1 - 8;
-  if (h.y > C.H + 40) { const sx = findSafeX(Game.terrain); h.x = sx; h.y = surfaceAt(Game.terrain, sx) ?? C.PLAT_Y; h.vy = 0; }
+  // variable-height jump via 3-phase gravity
+  if (!Input.jumpHeld) h.jumping = false;
+  let g;
+  if (h.vy < 0) g = (Input.jumpHeld && h.jumping) ? C.G_HELD : C.G_CUT;
+  else { g = C.G_FALL; h.jumping = false; }
+  h.vy = Math.min(h.vy + g * dt, C.MAX_FALL);
+
+  collideHero(h, dt);
+
+  // lava death — fell into a hole or off an edge and reached the lava surface
+  if (h.y >= C.LAVA_Y) heroDie();
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -458,6 +565,42 @@ function drawTerrain() {
   }
 }
 
+function heroColor(h) {
+  const p = PALETTE[h.colorIdx];
+  if (p && p.rainbow) return `hsl(${(Game.t * 90) % 360} 90% 62%)`;
+  return (p && p.css) || '#39a0ed';
+}
+
+function drawHero() {
+  const h = Game.hero, C = CONFIG;
+  const x = Math.round(h.x - h.w / 2), y = Math.round(h.y - h.h);
+  let alpha = 1;
+  if (h.ghost > 0) alpha = 0.35 + 0.3 * (0.5 + 0.5 * Math.sin(Game.t * 34));   // ghostly respawn
+  else if (h.hurt > 0 && ((Game.t * 20) | 0) & 1) alpha = 0.35;                // i-frame flicker
+  ctx.globalAlpha = alpha;
+
+  // legs (little walk cycle on the ground)
+  ctx.fillStyle = '#0a0a0a';
+  const moving = h.onGround && Math.abs(h.vx) > 6;
+  const step = moving ? (Math.sin(Game.t * 20) > 0 ? 1 : 0) : 0;
+  ctx.fillRect(x + 1, h.y - 3, 3, 3 + step);
+  ctx.fillRect(x + h.w - 4, h.y - 3, 3, 4 - step);
+
+  // body frame
+  ctx.fillStyle = '#0a0a0a';
+  ctx.fillRect(x, y, h.w, h.h - 2);
+  // interior colour — the "T" from the concept art
+  const col = heroColor(h);
+  ctx.fillStyle = col;
+  ctx.fillRect(x + 2, y + 2, h.w - 4, 3);                       // top bar
+  ctx.fillRect(x + (h.w >> 1) - 1 + (h.face > 0 ? 0 : 0), y + 2, 3, h.h - 8); // stem
+  ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.fillRect(x + 2, y + 2, h.w - 4, 1);
+  // eye dot, faces travel direction
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(x + (h.face > 0 ? h.w - 4 : 2), y + 6, 2, 2);
+  ctx.globalAlpha = 1;
+}
+
 function render() {
   const C = CONFIG;
   // Sky
@@ -477,14 +620,8 @@ function render() {
   ctx.fillStyle = '#39a0ed';
   ctx.fillRect(C.SPAWN_X - 4, C.SPAWN_Y - 4, 8, 8);
 
-  // Hero placeholder (real sprite in P3)
-  if (Game.scene === 'PLAY') {
-    const h = Game.hero;
-    ctx.fillStyle = '#000';
-    ctx.fillRect(Math.round(h.x - h.w / 2), Math.round(h.y - h.h), h.w, h.h);
-    ctx.fillStyle = PALETTE[h.colorIdx].css || '#39a0ed';
-    ctx.fillRect(Math.round(h.x - h.w / 2) + 3, Math.round(h.y - h.h) + 3, h.w - 6, h.h - 6);
-  }
+  // Hero
+  if (Game.scene === 'PLAY') drawHero();
 
   // HUD (minimal placeholder; full HUD in P6)
   ctx.fillStyle = '#eee8d5';
@@ -501,12 +638,13 @@ function render() {
 // ══════════════════════════════════════════════════════════════════
 //  LOOP — fixed timestep with accumulator; render every frame
 // ══════════════════════════════════════════════════════════════════
-let acc = 0, last = null, _fpsT = 0, _fpsN = 0;
+let acc = 0, last = null, _fpsT = 0, _fpsN = 0, testFreeze = false;
 function tick(now) {
   if (last === null) last = now;
   let el = (now - last) / 1000; last = now;
   if (el > 0.25) el = 0.25;                 // clamp huge gaps (tab was hidden)
-  if (Game.scene === 'PLAY' && !Game.paused) {
+  if (testFreeze) { /* physics driven manually by BS.stepFixed in tests */ }
+  else if (Game.scene === 'PLAY' && !Game.paused) {
     acc += el;
     let guard = 0;
     while (acc >= CONFIG.DT && guard++ < 600) { update(CONFIG.DT); acc -= CONFIG.DT; }
@@ -557,12 +695,17 @@ window.BS = {
   findSafeX,
   terrain: () => Game.terrain,
   setLevel: (n) => { Game.level = n | 0; buildLevel(); },
+  hero: () => Game.hero,
+  heroHurt,           // simulate an enemy/boss hit (P4/P5 call this internally)
+  respawnHero,
   Input,
   audioState: () => (Audio.ctx ? Audio.ctx.state : 'none'),
   start: startGame,
   pause: togglePause,
   isPaused: () => Game.paused,
   // Deterministic simulation stepping (bypasses rAF timing) for physics tests.
+  // freeze() stops the rAF loop from advancing physics so stepFixed is authoritative.
+  freeze: (on) => { testFreeze = !!on; },
   step: (dt) => update(dt),
   stepFixed: (n) => { for (let i = 0; i < (n | 0); i++) update(CONFIG.DT); },
 };
