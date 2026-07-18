@@ -100,12 +100,18 @@ const CONFIG = {
   W: 480, H: 270, TILE: 16,
   DT: 1 / 120,                       // fixed physics timestep (s)
   // World layout (logical px). Tower is central; lava fills both flanks.
-  PLAT_Y: 178,                       // platform top surface
-  PLAT_X0: 60, PLAT_X1: 420,         // platform span (off either edge = lava)
-  LAVA_Y: 236,                       // lava surface level
-  SPAWN_X: 398, SPAWN_Y: 96,         // spawner cube centre
+  // Platform span is tile-aligned: (416-64)/16 = 22 columns.
+  PLAT_Y: 178,                       // base platform top surface
+  PLAT_X0: 64, PLAT_X1: 416,         // platform span (off either edge = lava)
+  LAVA_Y: 232,                       // lava surface level
+  SPAWN_X: 396, SPAWN_Y: 92,         // spawner cube centre
   // Physics (tuned properly in P3/P7; placeholder-friendly here)
   GRAVITY: 900, MOVE_SPEED: 96, JUMP_V: 330,
+  // Terrain contract: generator guarantees holes ≤ MAX_JUMP_GAP and vertical
+  // steps ≤ JUMP_MAX_H; hero physics (P3) must be able to clear both.
+  MAX_JUMP_GAP: 48,                  // 3 tiles — widest hole the hero can clear
+  JUMP_MAX_H: 48,                    // 3 tiles — apex height
+  STEP_MAX: 6,                       // auto-step-up threshold (px); taller = wall
   // Meta
   LIVES_START: 3, LEVEL_TIME: 60, RESPAWN_GHOST: 2.0,
 };
@@ -125,6 +131,93 @@ const PALETTE = [
 ];
 
 // ══════════════════════════════════════════════════════════════════
+//  TERRAIN — seeded, per-level. Deterministic pure function of
+//  (level, seed). Column heightmap → walkable segments; gaps = holes
+//  (lava below). Fairness guaranteed by construction:
+//    · solid footing at both ends
+//    · every hole width ≤ MAX_JUMP_GAP
+//    · every vertical step ≤ JUMP_MAX_H
+//  L1 flat · L2/L4 hills + holes · L3 split into raised mini-platforms.
+// ══════════════════════════════════════════════════════════════════
+function genTerrain(level, seed) {
+  const C = CONFIG, T = C.TILE, x0 = C.PLAT_X0, x1 = C.PLAT_X1, baseTop = C.PLAT_Y;
+  const nCols = Math.round((x1 - x0) / T);                 // 22
+  const EDGE = 2;                                          // solid columns each end
+  const maxHoleCols = Math.max(1, Math.floor(C.MAX_JUMP_GAP / T));
+  const rand = mulberry32(((seed >>> 0) ^ Math.imul(level | 0, 0x9E3779B1)) >>> 0);
+  const h = new Array(nCols).fill(baseTop);               // null = hole
+
+  function carveHoles(count, minW, maxW) {
+    let placed = 0, tries = 0;
+    maxW = Math.min(maxW, maxHoleCols);
+    while (placed < count && tries++ < 300) {
+      const w = minW + Math.floor(rand() * (maxW - minW + 1));
+      const start = EDGE + Math.floor(rand() * (nCols - 2 * EDGE - w));
+      let ok = true;                                       // need a solid buffer col on each side
+      for (let i = start - 1; i <= start + w; i++) { if (i < EDGE || i >= nCols - EDGE || h[i] === null) { ok = false; break; } }
+      if (!ok) continue;
+      for (let i = start; i < start + w; i++) h[i] = null;
+      placed++;
+    }
+    return placed;
+  }
+  function raiseHills(count, dTiles) {
+    let placed = 0, tries = 0;
+    while (placed < count && tries++ < 300) {
+      const w = 2 + Math.floor(rand() * 3);                // 2-4 cols
+      const start = EDGE + Math.floor(rand() * (nCols - 2 * EDGE - w));
+      let ok = true;
+      for (let i = start; i < start + w; i++) { if (h[i] !== baseTop) { ok = false; break; } }
+      if (!ok) continue;
+      for (let i = start; i < start + w; i++) h[i] = baseTop - dTiles * T;
+      placed++;
+    }
+    return placed;
+  }
+
+  if (level === 1) { /* flat */ }
+  else if (level === 2) { carveHoles(2 + Math.floor(rand() * 2), 1, 2); raiseHills(1 + Math.floor(rand() * 2), 1); }
+  else if (level === 3) { carveHoles(1 + Math.floor(rand() * 2), 2, maxHoleCols); }
+  else { carveHoles(3 + Math.floor(rand() * 2), 1, 2); raiseHills(2 + Math.floor(rand() * 2), 1); }
+
+  // L3: raise every other mini-platform by one tile (visual + light platforming).
+  if (level === 3) {
+    let seg = -1, prevNull = true;
+    for (let i = 0; i < nCols; i++) {
+      if (h[i] === null) { prevNull = true; continue; }
+      if (prevNull) seg++;
+      prevNull = false;
+      if (seg % 2 === 1) h[i] = baseTop - T;
+    }
+  }
+
+  // Extract contiguous equal-height runs into segments.
+  const segments = [];
+  let i = 0;
+  while (i < nCols) {
+    if (h[i] === null) { i++; continue; }
+    let j = i; while (j < nCols && h[j] === h[i]) j++;
+    segments.push({ x0: x0 + i * T, x1: x0 + j * T, top: h[i] });
+    i = j;
+  }
+  return { level, seed: seed >>> 0, cols: h, segments, baseTop, x0, x1, colW: T, nCols };
+}
+
+// Surface top y at world-x, or null if over a hole / off the platform.
+function surfaceAt(terrain, x) {
+  if (!terrain || x < terrain.x0 || x >= terrain.x1) return null;
+  return terrain.cols[Math.floor((x - terrain.x0) / terrain.colW)];
+}
+// A solid x near the centre, for hero spawn / respawn.
+function findSafeX(terrain) {
+  const mid = (terrain.x0 + terrain.x1) / 2;
+  for (let d = 0; d < (terrain.x1 - terrain.x0); d += terrain.colW) {
+    for (const x of [mid + d, mid - d]) { if (surfaceAt(terrain, x) != null) return Math.round(x); }
+  }
+  return Math.round(mid);
+}
+
+// ══════════════════════════════════════════════════════════════════
 //  STATE
 // ══════════════════════════════════════════════════════════════════
 const Game = {
@@ -135,12 +228,18 @@ const Game = {
   t: 0,                  // seconds elapsed in current scene
   level: 1,
   lives: CONFIG.LIVES_START,
+  terrain: null,
   // Placeholder hero (real physics arrives in P3) — proves loop↔input↔render.
   hero: { x: 240, y: CONFIG.PLAT_Y, vx: 0, vy: 0, w: 14, h: 18, onGround: true, face: 1, colorIdx: 0 },
   fps: 0,
 };
 
-function reseed(seed) { Game.seed = seed >>> 0; Game.rand = mulberry32(Game.seed); }
+function reseed(seed) { Game.seed = seed >>> 0; Game.rand = mulberry32(Game.seed); buildLevel(); }
+function buildLevel() {
+  Game.terrain = genTerrain(Game.level, Game.seed);
+  const sx = findSafeX(Game.terrain);
+  Object.assign(Game.hero, { x: sx, y: surfaceAt(Game.terrain, sx) ?? CONFIG.PLAT_Y, vx: 0, vy: 0, onGround: true });
+}
 
 // ══════════════════════════════════════════════════════════════════
 //  INPUT — arrow keys / WASD / space  +  on-screen touch buttons
@@ -251,10 +350,10 @@ function firstGesture() {           // called on the first tap/keypress
   if (!_started) { _started = true; startGame(); }
 }
 function startGame() {
-  reseed(pickSeed());
-  Game.scene = 'PLAY'; Game.t = 0; Game.level = 1; Game.lives = CONFIG.LIVES_START;
-  Game.paused = false;
-  Object.assign(Game.hero, { x: 240, y: CONFIG.PLAT_Y, vx: 0, vy: 0, onGround: true, face: 1 });
+  Game.level = 1;
+  reseed(pickSeed());                    // reseed → buildLevel() lays terrain + places hero
+  Game.scene = 'PLAY'; Game.t = 0; Game.lives = CONFIG.LIVES_START;
+  Game.paused = false; Game.hero.face = 1;
   document.getElementById('start').classList.add('hidden');
   Audio.sfx('start');
 }
@@ -281,10 +380,14 @@ function update(dt) {
   h.x += h.vx * dt;
   h.y += h.vy * dt;
 
-  // Placeholder floor at platform level; clamp to platform span.
-  if (h.y >= C.PLAT_Y) { h.y = C.PLAT_Y; h.vy = 0; h.onGround = true; }
-  if (h.x < C.PLAT_X0 + 8) h.x = C.PLAT_X0 + 8;
+  // Placeholder collision: rest on the terrain surface if there is ground under
+  // the hero; otherwise fall (holes). Real AABB physics arrives in P3.
+  const surf = surfaceAt(Game.terrain, h.x);
+  if (surf != null && h.y >= surf) { h.y = surf; h.vy = 0; h.onGround = true; }
+  else h.onGround = false;
+  if (h.x < C.PLAT_X0 + 8) h.x = C.PLAT_X0 + 8;      // world walls (P3 adds real edge/hole death)
   if (h.x > C.PLAT_X1 - 8) h.x = C.PLAT_X1 - 8;
+  if (h.y > C.H + 40) { const sx = findSafeX(Game.terrain); h.x = sx; h.y = surfaceAt(Game.terrain, sx) ?? C.PLAT_Y; h.vy = 0; }
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -294,6 +397,67 @@ const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 ctx.imageSmoothingEnabled = false;
 
+// Per-level terrain decoration palette.
+const DECO = {
+  1: { body: '#2b2f38', edge: '#5b6472', hi: '#7a8494', brick: '#242830' },
+  2: { body: '#3a3324', edge: '#6b5b3a', hi: '#8a7a4a', brick: '#2e2820' },
+  3: { body: '#243a4a', edge: '#3a7ba0', hi: '#5aa6d0', brick: '#1e3240' },
+  4: { body: '#33243a', edge: '#7a3a6b', hi: '#a04a8a', brick: '#2a1e30' },
+};
+
+function drawLava() {
+  const C = CONFIG, t = Game.t, y0 = C.LAVA_Y;
+  ctx.fillStyle = '#7a0d13';
+  ctx.fillRect(0, y0, C.W, C.H - y0);
+  // wobbling molten surface band
+  for (let x = 0; x < C.W; x += 4) {
+    const wob = Math.sin(x * 0.05 + t * 2.6) * 2 + Math.sin(x * 0.11 - t * 3.7) * 1.4;
+    ctx.fillStyle = (((x >> 2) + (t * 5 | 0)) & 1) ? '#ff7a00' : '#f4a300';
+    ctx.fillRect(x, y0 + wob - 1, 4, 5);
+  }
+  ctx.fillStyle = '#ffd25a';
+  for (let x = 0; x < C.W; x += 4) {
+    const wob = Math.sin(x * 0.05 + t * 2.6) * 2;
+    if (((x * 7 + (t * 8 | 0)) % 23) === 0) ctx.fillRect(x, y0 + wob - 2, 3, 2);
+  }
+  // rising bubbles
+  ctx.fillStyle = '#ffb01e';
+  for (let i = 0; i < 16; i++) {
+    const bx = (i * 89 + 13) % C.W;
+    const phase = (t * 0.6 + i * 0.41) % 1;
+    const by = y0 + 20 - phase * 18;
+    if (phase > 0.12 && phase < 0.95) { const r = 1 + (i % 3 === 0 ? 1 : 0); ctx.fillRect(bx, by, r + 1, r + 1); }
+  }
+}
+
+function drawTerrain() {
+  const C = CONFIG, ter = Game.terrain;
+  if (!ter) return;
+  const segs = ter.segments, d = DECO[ter.level] || DECO[1];
+  // Hole chutes (dark shafts with a lava glow at the bottom).
+  for (let i = 0; i < segs.length - 1; i++) {
+    const hx0 = segs[i].x1, hx1 = segs[i + 1].x0;
+    if (hx1 <= hx0) continue;
+    ctx.fillStyle = '#180a10';
+    ctx.fillRect(hx0, C.PLAT_Y - 2, hx1 - hx0, C.LAVA_Y - (C.PLAT_Y - 2));
+    const glow = 0.5 + 0.5 * Math.sin(Game.t * 4 + hx0);
+    ctx.fillStyle = `rgba(244,120,0,${0.25 + 0.35 * glow})`;
+    ctx.fillRect(hx0, C.LAVA_Y - 14, hx1 - hx0, 14);
+  }
+  // Solid columns per segment.
+  for (const s of segs) {
+    const w = s.x1 - s.x0;
+    ctx.fillStyle = d.body; ctx.fillRect(s.x0, s.top, w, C.H - s.top);
+    // brick texture
+    ctx.fillStyle = d.brick;
+    for (let by = s.top + 6; by < C.H; by += 10) ctx.fillRect(s.x0, by, w, 1);
+    for (let bx = s.x0 + 8; bx < s.x1; bx += 16) ctx.fillRect(bx, s.top, 1, C.H - s.top);
+    // lit top edge + step face on the left flank of raised segments
+    ctx.fillStyle = d.edge; ctx.fillRect(s.x0, s.top, w, 4);
+    ctx.fillStyle = d.hi;   ctx.fillRect(s.x0, s.top, w, 1);
+  }
+}
+
 function render() {
   const C = CONFIG;
   // Sky
@@ -301,21 +465,11 @@ function render() {
   g.addColorStop(0, '#241a2e'); g.addColorStop(1, '#3a1f2b');
   ctx.fillStyle = g; ctx.fillRect(0, 0, C.W, C.H);
 
-  // Lava flanks (static placeholder; animated bubbling in P2)
-  ctx.fillStyle = '#c1121f';
-  ctx.fillRect(0, C.LAVA_Y, C.PLAT_X0, C.H - C.LAVA_Y);
-  ctx.fillRect(C.PLAT_X1, C.LAVA_Y, C.W - C.PLAT_X1, C.H - C.LAVA_Y);
-  ctx.fillStyle = '#f4a300';
-  for (let x = 4; x < C.PLAT_X0; x += 14) ctx.fillRect(x, C.LAVA_Y + 2, 6, 3);
-  for (let x = C.PLAT_X1 + 4; x < C.W; x += 14) ctx.fillRect(x, C.LAVA_Y + 2, 6, 3);
+  // Bubbling lava lake (full width; tower columns painted over solid ground)
+  drawLava();
 
-  // Tower + platform
-  ctx.fillStyle = '#2b2f38';
-  ctx.fillRect(C.PLAT_X0, C.PLAT_Y + 2, C.PLAT_X1 - C.PLAT_X0, C.H - C.PLAT_Y);
-  ctx.fillStyle = '#3d4450';
-  ctx.fillRect(C.PLAT_X0, C.PLAT_Y - 4, C.PLAT_X1 - C.PLAT_X0, 6);
-  ctx.fillStyle = '#525b6b';
-  ctx.fillRect(C.PLAT_X0, C.PLAT_Y - 4, C.PLAT_X1 - C.PLAT_X0, 2);
+  // Tower columns + platform tops (holes are left as lava chutes)
+  drawTerrain();
 
   // Spawner cube (placeholder; animated in P4)
   ctx.fillStyle = '#111';
@@ -397,6 +551,12 @@ window.BS = {
   scene: () => Game.scene,
   seed: () => Game.seed,
   reseed,
+  // Terrain (pure generator + active instance) for fairness tests.
+  genTerrain,
+  surfaceAt,
+  findSafeX,
+  terrain: () => Game.terrain,
+  setLevel: (n) => { Game.level = n | 0; buildLevel(); },
   Input,
   audioState: () => (Audio.ctx ? Audio.ctx.state : 'none'),
   start: startGame,
