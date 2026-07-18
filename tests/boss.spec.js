@@ -52,7 +52,9 @@ test.describe('P5 · three stomps to die, look flips at hit 2', () => {
         seq.push({ hits: bb ? bb.hits : 3, enraged: bb ? bb.hits >= 2 : true, aliveBoss: !!bb });
       }
       const sceneAfterKill = st.scene, levelAtClear = st.level;
-      window.BS.tapAdvance();                 // dismiss the CLEAR screen
+      window.BS.tapAdvance();                 // CLEAR → SHOP
+      window.BS.closeShop();                   // leave the merchant
+      for (let k = 0; k < 200 && st.scene === 'SHOP'; k++) window.BS.stepFixed(1);
       return { seq, sceneAfterKill, levelAtClear, levelAfter: st.level, sceneAfter: st.scene, bossAliveAfter: !!window.BS.boss() };
     });
     expect(r.seq[0].hits).toBe(1);

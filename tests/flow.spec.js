@@ -16,11 +16,15 @@ test.describe('P6 · scene flow', () => {
       const bossType = window.BS.boss() && window.BS.boss().type;
       for (let k = 0; k < 3; k++) { window.BS.boss().iframe = 0; window.BS.bossHit(); }
       const sceneClear = st.scene, gained = st.gainedLife, hpAfter = st.hp;
-      window.BS.tapAdvance();                  // dismiss CLEAR
-      return { bossType, sceneClear, gained, hp0, hpAfter, level: st.level, scene: st.scene };
+      window.BS.tapAdvance();                  // CLEAR → SHOP (merchant visits)
+      const sceneShop = st.scene;
+      window.BS.closeShop();                    // leave the merchant
+      for (let k = 0; k < 30 && st.scene === 'SHOP'; k++) window.BS.stepFixed(1);  // merchant departs
+      return { bossType, sceneClear, sceneShop, gained, hp0, hpAfter, level: st.level, scene: st.scene };
     });
     expect(r.bossType).toBe('clear');
     expect(r.sceneClear).toBe('CLEAR');
+    expect(r.sceneShop).toBe('SHOP');          // merchant appears after the level
     expect(r.gained).toBe(true);               // no-hit level
     expect(r.hpAfter).toBe(r.hp0 + 1);         // +1 heart bonus (can exceed 3)
     expect(r.level).toBe(2);
@@ -69,10 +73,14 @@ test.describe('P6 · scene flow', () => {
       const need = window.BS.boss().maxHits;      // L4 Normal boss has 6 HP
       for (let k = 0; k < need; k++) { window.BS.boss().iframe = 0; window.BS.bossHit(); }
       const clear = st.scene;              // CLEAR first
-      window.BS.tapAdvance();              // → VICTORY (past level 4)
-      return { clear, scene: st.scene };
+      window.BS.tapAdvance();              // CLEAR → SHOP (merchant after L4 too)
+      const shop = st.scene;
+      window.BS.closeShop();
+      for (let k = 0; k < 30 && st.scene === 'SHOP'; k++) window.BS.stepFixed(1);  // → VICTORY (past level 4)
+      return { clear, shop, scene: st.scene };
     });
     expect(r.clear).toBe('CLEAR');
+    expect(r.shop).toBe('SHOP');
     expect(r.scene).toBe('VICTORY');
   });
 });
