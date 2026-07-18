@@ -148,17 +148,17 @@ test.describe('P5 · attack patterns', () => {
 test.describe('P5 · boss contact hurts the hero', () => {
   test('charging into the hero deals a hit (knock, no life lost)', async ({ page }) => {
     const r = await page.evaluate(() => {
-      window.BS.start(); window.BS.reseed(1); window.BS.setLevel(1);
-      const st = window.BS.state(); st.lives = 3;
+      window.BS.start(); window.BS.reseed(1); window.BS.setLevel(1); window.BS.setMode('normal');
+      const st = window.BS.state(); st.hp = 3;
       window.BS.activateBoss();
       const b = window.BS.boss(), C = window.BS.CONFIG, h = window.BS.hero();
       // put the boss mid-charge, hero directly in front on the ground
       Object.assign(b, { state: 'charge', iframe: 0, x: 260, y: C.PLAT_Y, onGround: true });
       Object.assign(h, { x: 250, y: C.PLAT_Y, vx: 0, vy: 0, onGround: true, ghost: 0, hurt: 0, dead: false });
       window.BS.stepFixed(1);
-      return { hurt: h.hurt, vx: h.vx, lives: st.lives };
+      return { hurt: h.hurt, vx: h.vx, hp: st.hp };
     });
     expect(r.hurt).toBeGreaterThan(0);    // took a hit
-    expect(r.lives).toBe(3);              // but no life lost
+    expect(r.hp).toBeCloseTo(2.75, 5);    // Normal: chipped 1/4 heart
   });
 });

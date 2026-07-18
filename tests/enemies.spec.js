@@ -53,8 +53,8 @@ test.describe('P4 · spawner cadence & roster', () => {
 test.describe('P4 · stomp vs hurt classification', () => {
   test('falling onto an enemy kills it and bounces the hero (no life lost)', async ({ page }) => {
     const r = await page.evaluate(() => {
-      window.BS.start(); window.BS.reseed(1); window.BS.setLevel(1);
-      const st = window.BS.state(); st.lives = 3; st.enemies.length = 0;
+      window.BS.start(); window.BS.reseed(1); window.BS.setLevel(1); window.BS.setMode('normal');
+      const st = window.BS.state(); st.hp = 3; st.enemies.length = 0;
       const C = window.BS.CONFIG, h = window.BS.hero();
       Object.assign(h, { x: 240, y: C.PLAT_Y, vx: 0, vy: 0, onGround: true, ghost: 0, hurt: 0, dead: false });
       st.bossActive = true;              // stop auto-spawns for a clean single enemy
@@ -65,28 +65,28 @@ test.describe('P4 · stomp vs hurt classification', () => {
       Object.assign(h, { x: 240, y: C.PLAT_Y - e.r - 3, vy: 60 });
       const kills0 = st.kills;
       window.BS.stepFixed(2);
-      return { alive: e.alive, kills: st.kills - kills0, heroVy: h.vy, lives: st.lives, heroHurt: h.hurt };
+      return { alive: e.alive, kills: st.kills - kills0, heroVy: h.vy, hp: st.hp, heroHurt: h.hurt };
     });
     expect(r.alive).toBe(false);          // enemy killed
     expect(r.kills).toBe(1);
     expect(r.heroVy).toBeLessThan(0);     // hero bounced up
-    expect(r.lives).toBe(3);              // stomping costs no life
+    expect(r.hp).toBe(3);                 // stomping costs no health
     expect(r.heroHurt).toBe(0);           // and does not hurt the hero
   });
 
-  test('side contact hurts the hero (knock left, no life); ghost passes through (neg. control)', async ({ page }) => {
+  test('side contact hurts the hero (knock left, chips a heart); ghost passes through (neg. control)', async ({ page }) => {
     const r = await page.evaluate(() => {
-      window.BS.start(); window.BS.reseed(1); window.BS.setLevel(1);
-      const st = window.BS.state(); st.lives = 3; st.enemies.length = 0;
+      window.BS.start(); window.BS.reseed(1); window.BS.setLevel(1); window.BS.setMode('normal');
+      const st = window.BS.state(); st.enemies.length = 0;
       const C = window.BS.CONFIG, h = window.BS.hero();
       const place = (ghost) => {
-        st.enemies.length = 0;
+        st.enemies.length = 0; st.hp = 3;
         Object.assign(h, { x: 240, y: C.PLAT_Y, vx: 0, vy: 0, onGround: true, ghost, hurt: 0, dead: false });
         window.BS.spawnEnemy('clear');
         const e = window.BS.enemies()[0];
         Object.assign(e, { x: 240 + 6, y: C.PLAT_Y, vx: 0, vy: 0, onGround: true });  // level with hero, to its right
         window.BS.stepFixed(1);
-        return { hurt: h.hurt, vx: h.vx, alive: e.alive, lives: st.lives };
+        return { hurt: h.hurt, vx: h.vx, alive: e.alive, hp: st.hp };
       };
       const contact = place(0);
       const ghostly = place(1e9);
@@ -95,7 +95,7 @@ test.describe('P4 · stomp vs hurt classification', () => {
     expect(r.contact.hurt).toBeGreaterThan(0);    // hurt applied
     expect(r.contact.vx).toBeLessThan(0);         // knocked LEFT (enemy was to the right)
     expect(r.contact.alive).toBe(true);           // side contact does NOT kill the enemy
-    expect(r.contact.lives).toBe(3);              // no life lost
+    expect(r.contact.hp).toBeCloseTo(2.75, 5);    // Normal: lost 1/4 heart
     expect(r.ghostly.hurt).toBe(0);               // negative control: ghost → pass through, no hurt
   });
 });
