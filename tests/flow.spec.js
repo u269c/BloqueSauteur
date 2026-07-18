@@ -9,19 +9,20 @@ test.describe('P6 · scene flow', () => {
     await page.evaluate(() => window.BS.freeze(true));
     const r = await page.evaluate(() => {
       window.BS.start();                       // straight into PLAY on L1
+      window.BS.setMode('normal');
       const st = window.BS.state(); st.hero.ghost = 1e9; st.hitThisLevel = false;   // survive untouched
-      const lives0 = st.lives;
+      const hp0 = st.hp;
       st.t = window.BS.CONFIG.LEVEL_TIME + 0.01; window.BS.stepFixed(1);            // boss emerges
       const bossType = window.BS.boss() && window.BS.boss().type;
       for (let k = 0; k < 3; k++) { window.BS.boss().iframe = 0; window.BS.bossHit(); }
-      const sceneClear = st.scene, gained = st.gainedLife, livesAfter = st.lives;
+      const sceneClear = st.scene, gained = st.gainedLife, hpAfter = st.hp;
       window.BS.tapAdvance();                  // dismiss CLEAR
-      return { bossType, sceneClear, gained, lives0, livesAfter, level: st.level, scene: st.scene };
+      return { bossType, sceneClear, gained, hp0, hpAfter, level: st.level, scene: st.scene };
     });
     expect(r.bossType).toBe('clear');
     expect(r.sceneClear).toBe('CLEAR');
     expect(r.gained).toBe(true);               // no-hit level
-    expect(r.livesAfter).toBe(r.lives0 + 1);   // +1 life bonus (can exceed 3)
+    expect(r.hpAfter).toBe(r.hp0 + 1);         // +1 heart bonus (can exceed 3)
     expect(r.level).toBe(2);
     expect(r.scene).toBe('INTRO');
   });
@@ -30,29 +31,32 @@ test.describe('P6 · scene flow', () => {
     await openGame(page);
     await page.evaluate(() => window.BS.freeze(true));
     const r = await page.evaluate(() => {
-      window.BS.start(); const st = window.BS.state(); st.hero.ghost = 0; st.hitThisLevel = false; st.lives = 3;
+      window.BS.start(); window.BS.setMode('normal');
+      const st = window.BS.state(); st.hero.ghost = 0; st.hero.hurt = 0; st.hitThisLevel = false; st.hp = 3;
       window.BS.heroHurt(true);                // take a hit this level
+      const hpAfterHit = st.hp;
       st.t = window.BS.CONFIG.LEVEL_TIME + 0.01; window.BS.stepFixed(1);
       for (let k = 0; k < 3; k++) { window.BS.boss().iframe = 0; window.BS.bossHit(); }
-      return { gained: st.gainedLife, lives: st.lives };
+      return { gained: st.gainedLife, hp: st.hp, hpAfterHit };
     });
-    expect(r.gained).toBe(false);
-    expect(r.lives).toBe(3);                   // no bonus
+    expect(r.hpAfterHit).toBeCloseTo(2.75, 5); // hit chipped a heart
+    expect(r.gained).toBe(false);              // and forfeited the bonus
+    expect(r.hp).toBeCloseTo(2.75, 5);         // no +1 heart awarded
   });
 
-  test('E2E: losing all lives ends in GAME OVER', async ({ page }) => {
+  test('E2E: losing all health ends in GAME OVER', async ({ page }) => {
     await openGame(page);
     await page.evaluate(() => window.BS.freeze(true));
     const r = await page.evaluate(() => {
-      window.BS.start(); const st = window.BS.state(); st.lives = 3;
+      window.BS.start(); const st = window.BS.state(); st.hp = 3;
       const C = window.BS.CONFIG, h = window.BS.hero();
-      for (let d = 0; d < 3 && st.scene === 'PLAY'; d++) {           // three fatal lava falls
+      for (let d = 0; d < 3 && st.scene === 'PLAY'; d++) {           // three fatal lava falls (−1 heart each)
         Object.assign(h, { x: C.PLAT_X0 - 30, y: C.LAVA_Y + 1, vx: 0, vy: 0, ghost: 0, hurt: 0, dead: false, onGround: false });
         window.BS.stepFixed(1);
       }
-      return { lives: st.lives, scene: st.scene };
+      return { hp: st.hp, scene: st.scene };
     });
-    expect(r.lives).toBe(0);
+    expect(r.hp).toBe(0);
     expect(r.scene).toBe('GAMEOVER');
   });
 
@@ -60,9 +64,10 @@ test.describe('P6 · scene flow', () => {
     await openGame(page);
     await page.evaluate(() => window.BS.freeze(true));
     const r = await page.evaluate(() => {
-      window.BS.start(); const st = window.BS.state(); st.level = 4; window.BS.setLevel(4); st.hero.ghost = 1e9;
+      window.BS.start(); window.BS.setMode('normal'); const st = window.BS.state(); st.level = 4; window.BS.setLevel(4); st.hero.ghost = 1e9;
       st.t = window.BS.CONFIG.LEVEL_TIME + 0.01; window.BS.stepFixed(1);
-      for (let k = 0; k < 3; k++) { window.BS.boss().iframe = 0; window.BS.bossHit(); }
+      const need = window.BS.boss().maxHits;      // L4 Normal boss has 6 HP
+      for (let k = 0; k < need; k++) { window.BS.boss().iframe = 0; window.BS.bossHit(); }
       const clear = st.scene;              // CLEAR first
       window.BS.tapAdvance();              // → VICTORY (past level 4)
       return { clear, scene: st.scene };

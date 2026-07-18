@@ -33,6 +33,16 @@ network. On a phone/tablet, drop it on your home screen for a full-screen experi
 - **Colour picker** on the title screen recolours your hero (cosmetic). **Rainbow**
   unlocks once you reach level 4. Your choice is saved locally.
 
+## Modes (pick on the title screen)
+
+- **Easy** — monster hits are harmless; you can only die by falling in the lava.
+- **Normal** — a hit chips ¼ of a heart; the level boss has 3 / 4 / 5 / 6 HP (L1→L4).
+- **RAGE MODE** — a **second spawn box** feeds monsters from the left too; a hit costs
+  ½ a heart; the boss has 6 / 8 / 10 / 12 HP; and the no-hit life bonus is disabled.
+
+Health is measured in hearts (you start with 3; a lava fall costs a whole heart). Normal
+and RAGE also play faster, more frenetic music.
+
 ## Levels are seeded
 
 Terrain is generated from a seed (random each game). Append `?seed=N` to the URL to replay

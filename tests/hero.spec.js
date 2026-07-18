@@ -109,13 +109,13 @@ test.describe('P3 · lava death + respawn ghost', () => {
       for (let i = 0; i < t.nCols; i++) t.cols[i] = C.PLAT_Y;
       for (let i = 6; i < 6 + Math.floor(C.MAX_JUMP_GAP / T); i++) t.cols[i] = null;
       t.segments = []; let i = 0; while (i < t.nCols) { if (t.cols[i] == null) { i++; continue; } let j = i; while (j < t.nCols && t.cols[j] === t.cols[i]) j++; t.segments.push({ x0: t.x0 + i * T, x1: t.x0 + j * T, top: t.cols[i] }); i = j; }
-      const st = window.BS.state(); st.lives = 3;
+      const st = window.BS.state(); st.hp = 3;
       const h = window.BS.hero();
       Object.assign(h, { x: t.x0 + 7 * T, y: C.PLAT_Y - 10, vx: 0, vy: 0, onGround: false, dead: false, ghost: 0, hurt: 0 });
-      for (let k = 0; k < 240 && st.lives === 3; k++) window.BS.stepFixed(1);
-      return { lives: st.lives, ghost: h.ghost, respawnGhost: C.RESPAWN_GHOST, safeY: h.y, lavaY: C.LAVA_Y };
+      for (let k = 0; k < 240 && st.hp === 3; k++) window.BS.stepFixed(1);
+      return { hp: st.hp, ghost: h.ghost, respawnGhost: C.RESPAWN_GHOST, safeY: h.y, lavaY: C.LAVA_Y };
     });
-    expect(r.lives).toBe(2);
+    expect(r.hp).toBe(2);
     expect(r.ghost).toBeGreaterThan(0);
     expect(r.ghost).toBeLessThanOrEqual(r.respawnGhost);
     expect(r.safeY).toBeLessThan(r.lavaY);
@@ -125,23 +125,24 @@ test.describe('P3 · lava death + respawn ghost', () => {
 test.describe('P3 · hurt, knockback, invulnerability', () => {
   test('hit knocks left + grants i-frames; ghost/i-frames block further hits (neg. control)', async ({ page }) => {
     const r = await page.evaluate(() => {
-      window.BS.start(); window.BS.reseed(1); window.BS.setLevel(1); window.BS.Input.reset();
-      const st = window.BS.state(); st.lives = 3; st.hitThisLevel = false;
+      window.BS.start(); window.BS.reseed(1); window.BS.setLevel(1); window.BS.setMode('normal'); window.BS.Input.reset();
+      const st = window.BS.state(); st.hp = 3; st.hitThisLevel = false;
       const h = window.BS.hero(); Object.assign(h, { ghost: 0, hurt: 0, vx: 0, dead: false });
       const hit1 = window.BS.heroHurt(true);
-      const vxAfter = h.vx, hurtAfter = h.hurt, hitFlag = st.hitThisLevel;
+      const vxAfter = h.vx, hurtAfter = h.hurt, hitFlag = st.hitThisLevel, hpAfter1 = st.hp;
       const hit2 = window.BS.heroHurt(true);
       h.hurt = 0; h.ghost = 1.0;
       const hit3 = window.BS.heroHurt(true);
       window.BS.Input.reset();
-      return { hit1, hit2, hit3, vxAfter, hurtAfter, hitFlag, lives: st.lives };
+      return { hit1, hit2, hit3, vxAfter, hurtAfter, hitFlag, hp: st.hp, hpAfter1 };
     });
     expect(r.hit1).toBe(true);
     expect(r.vxAfter).toBeLessThan(0);        // knocked LEFT (toward the left lava)
     expect(r.hurtAfter).toBeGreaterThan(0);
     expect(r.hitFlag).toBe(true);
+    expect(r.hpAfter1).toBeCloseTo(2.75, 5);  // Normal: one hit chips 1/4 heart
     expect(r.hit2).toBe(false);               // negative control: i-frames block a second hit
     expect(r.hit3).toBe(false);               // negative control: ghost blocks hits
-    expect(r.lives).toBe(3);                  // a hit costs no life
+    expect(r.hp).toBeCloseTo(2.75, 5);        // blocked hits cost nothing more
   });
 });
