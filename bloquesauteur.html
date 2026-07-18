@@ -31,6 +31,9 @@
   #btn-left  { left:3vmin;  bottom:4vmin; }
   #btn-right { left:24vmin; bottom:4vmin; }
   #btn-jump  { right:3vmin; bottom:4vmin; width:22vmin; height:22vmin; }
+  #btn-shield { right:27vmin; bottom:6vmin; width:15vmin; height:15vmin; min-width:56px; min-height:56px; font-size:24px; }
+  #btn-shield.cooling { opacity:.45; }
+  #btn-shield .cd { position:absolute; font-size:min(4vmin,16px); font-weight:700; color:#f4d03f; }
 
   /* ── Overlays ──────────────────────────────────────────────────── */
   .overlay {
@@ -151,6 +154,7 @@
   <div id="controls" aria-hidden="true">
     <div class="btn" id="btn-left">◀</div>
     <div class="btn" id="btn-right">▶</div>
+    <div class="btn" id="btn-shield" style="display:none">⛊</div>
     <div class="btn" id="btn-jump">▲</div>
   </div>
 
@@ -199,7 +203,7 @@
 "use strict";
 (function () {
 
-const VERSION = 'v0.7';
+const VERSION = 'v0.8';
 
 // ══════════════════════════════════════════════════════════════════
 //  RNG — deterministic, seedable (mulberry32)
@@ -237,6 +241,8 @@ const CONFIG = {
   JUMP_V: 300, G_HELD: 940, G_CUT: 2600, G_FALL: 1050, MAX_FALL: 520,
   COYOTE: 0.08, JUMP_BUFFER: 0.10,
   HURT_IFRAMES: 1.0, KNOCKBACK: 155, KNOCK_LOCK: 0.18,
+  // Skills (from the shop)
+  SHIELD_ACTIVE: 1.3, SHIELD_CD: 10, DODGE_TIME: 1.15, DODGE_CD: 3,
   // Terrain contract: generator guarantees holes ≤ MAX_JUMP_GAP and vertical
   // steps ≤ JUMP_MAX_H; hero physics (P3) must be able to clear both.
   MAX_JUMP_GAP: 48,                  // 3 tiles — widest hole the hero can clear
@@ -460,6 +466,9 @@ const Game = {
     knock: 0,       // control-lock during knockback
     ghost: 0,       // respawn ghostly-invincibility timer (enemies pass through)
     dead: false,
+    airJumps: 0,    // remaining mid-air jumps (double-jump skill)
+    shieldT: 0, shieldCd: 0,   // spiked-shield active window / cooldown
+    dodgeT: 0, dodgeCd: 0,     // dodge untouchable window / cooldown
   },
   fps: 0,
 };
@@ -535,6 +544,7 @@ function buildLevel() {
   Object.assign(Game.hero, {
     x: sx, y: surfaceAt(Game.terrain, sx) ?? CONFIG.PLAT_Y, vx: 0, vy: 0,
     onGround: true, coyote: 0, jumpBuf: 0, jumping: false, hurt: 0, knock: 0, ghost: 0, dead: false,
+    airJumps: 0, shieldT: 0, shieldCd: 0, dodgeT: 0, dodgeCd: 0,
   });
 }
 function respawnHero() {
@@ -550,8 +560,9 @@ function respawnHero() {
 //  INPUT — arrow keys / WASD / space  +  on-screen touch buttons
 // ══════════════════════════════════════════════════════════════════
 const Input = {
-  left: false, right: false, jumpHeld: false,
+  left: false, right: false, jumpHeld: false, down: false,
   _jumpQueued: false,          // rising-edge latch, consumed by hero
+  _downQueued: false,          // rising-edge latch for the shield
   _sources: { kb: {}, touch: {} },
   press(action, on) {
     if (action === 'jump') {
@@ -559,15 +570,18 @@ const Input = {
       this.jumpHeld = on;
     } else if (action === 'left') this.left = on;
     else if (action === 'right') this.right = on;
+    else if (action === 'down') { if (on && !this.down) this._downQueued = true; this.down = on; }
   },
   consumeJump() { const q = this._jumpQueued; this._jumpQueued = false; return q; },
-  reset() { this.left = this.right = this.jumpHeld = false; this._jumpQueued = false; },
+  consumeDown() { const q = this._downQueued; this._downQueued = false; return q; },
+  reset() { this.left = this.right = this.jumpHeld = this.down = false; this._jumpQueued = this._downQueued = false; },
 };
 
 const KEYMAP = {
   ArrowLeft: 'left', KeyA: 'left',
   ArrowRight: 'right', KeyD: 'right',
   ArrowUp: 'jump', KeyW: 'jump', Space: 'jump',
+  ArrowDown: 'down', KeyS: 'down',
 };
 
 function initInput() {
@@ -598,7 +612,7 @@ function initInput() {
     el.addEventListener('pointerleave', up);
     el.addEventListener('contextmenu', (e) => e.preventDefault());
   };
-  bind('btn-left', 'left'); bind('btn-right', 'right'); bind('btn-jump', 'jump');
+  bind('btn-left', 'left'); bind('btn-right', 'right'); bind('btn-jump', 'jump'); bind('btn-shield', 'down');
 
   // Title / pause / HUD buttons
   const on = (id, fn) => document.getElementById(id).addEventListener('click', (e) => { e.preventDefault(); onFirstGesture(); fn(); });
@@ -1120,13 +1134,14 @@ function updateEnemies(dt) {
     // despawn: walked off either platform edge (or fell) → into the lava
     if (e.y >= C.LAVA_Y || e.x < C.PLAT_X0 - e.r - 2 || e.x > C.PLAT_X1 + e.r + 2) e.alive = false;
 
-    // hero interaction (skipped entirely while the hero is ghostly)
-    if (e.alive && h.ghost <= 0 && !h.dead) {
+    // hero interaction (skipped while ghostly or dodging — untouchable)
+    if (e.alive && h.ghost <= 0 && h.dodgeT <= 0 && !h.dead) {
       const el = e.x - e.r, er = e.x + e.r, etop = e.y - 2 * e.r, ebot = e.y;
       const hl = h.x - h.w / 2, hr = h.x + h.w / 2, htop = h.y - h.h, hbot = h.y;
       if (hr > el && hl < er && hbot > etop && htop < ebot) {
         const stomp = h.vy > 0 && h.y < e.y - e.r;   // falling onto its top half
         if (stomp) { e.alive = false; h.vy = -ENEMY.bounce; h.onGround = false; Game.points++; Audio.sfx('stomp'); spawnBurst(e.x, e.y - e.r, ENEMY_COL[e.type] || '#fff', 12); shake(3); }
+        else if (h.shieldT > 0) { e.alive = false; h.shieldT = 0; Game.points++; Audio.sfx('stomp'); spawnBurst(e.x, e.y - e.r, '#c9d0da', 16); shake(4); }  // spiked shield kills the attacker
         else heroHurt(e.x > h.x);                     // hit → knock away from the enemy
       }
     }
@@ -1208,13 +1223,14 @@ function updateBoss(dt) {
       break;
   }
 
-  // hero interaction (skipped while ghostly or during boss hit-stun)
-  if (h.ghost <= 0 && !h.dead && b.iframe <= 0) {
+  // hero interaction (skipped while ghostly, dodging, or during boss hit-stun)
+  if (h.ghost <= 0 && h.dodgeT <= 0 && !h.dead && b.iframe <= 0) {
     const bl = b.x - b.r, br = b.x + b.r, btop = b.y - 2 * b.r, bbot = b.y;
     const hl = h.x - h.w / 2, hr = h.x + h.w / 2, htop = h.y - h.h, hbot = h.y;
     if (hr > bl && hl < br && hbot > btop && htop < bbot) {
       const stomp = h.vy > 0 && h.y < b.y - b.r;
       if (stomp) { bossHit(b); Game.hero.vy = -ENEMY.bounce; Game.hero.onGround = false; }
+      else if (h.shieldT > 0) { h.shieldT = 0; bossHit(b); }   // shield damages the boss instead of hurting you
       else heroHurt(b.x > h.x);
     }
   }
@@ -1237,8 +1253,31 @@ function update(dt) {
   if (h.hurt > 0) h.hurt = Math.max(0, h.hurt - dt);
   if (h.ghost > 0) h.ghost = Math.max(0, h.ghost - dt);
   if (h.knock > 0) h.knock = Math.max(0, h.knock - dt);
+  if (h.shieldT > 0) h.shieldT = Math.max(0, h.shieldT - dt);
+  if (h.shieldCd > 0) h.shieldCd = Math.max(0, h.shieldCd - dt);
+  if (h.dodgeCd > 0) h.dodgeCd = Math.max(0, h.dodgeCd - dt);
   h.coyote = h.onGround ? C.COYOTE : Math.max(0, h.coyote - dt);
   h.jumpBuf = Input.consumeJump() ? C.JUMP_BUFFER : Math.max(0, h.jumpBuf - dt);
+  const downPressed = Input.consumeDown();
+
+  // ── Dodge (LEFT+RIGHT): spin untouchable in place, cannot fall ──
+  if (h.dodgeT > 0) {
+    h.dodgeT = Math.max(0, h.dodgeT - dt);
+    h.vx = 0; h.vy = 0;                       // frozen — no fall while dodging
+    if (h.dodgeT === 0) { h.dodgeCd = C.DODGE_CD; }
+    updateEnemies(dt);
+    if (!Game.bossActive && !Game.boss && Game.t >= C.LEVEL_TIME) activateBoss();
+    updateBoss(dt);
+    return;
+  }
+  if (Game.owned.dodge && Input.left && Input.right && h.dodgeCd <= 0) {
+    h.dodgeT = C.DODGE_TIME; Audio.sfx('jump'); shake(2); return;
+  }
+
+  // ── Spiked shield (DOWN): arm a front shield, 10s cooldown ──
+  if (downPressed && Game.owned.shield && h.shieldCd <= 0) {
+    h.shieldT = C.SHIELD_ACTIVE; h.shieldCd = C.SHIELD_CD; Audio.sfx('buzz');
+  }
 
   // horizontal control (suppressed briefly during knockback)
   if (h.knock <= 0) {
@@ -1249,10 +1288,14 @@ function update(dt) {
     if (dir !== 0) h.face = dir;
   }
 
-  // jump (with coyote time + input buffer)
+  // jump (ground/coyote) + optional mid-air double jump
   if (h.jumpBuf > 0 && (h.onGround || h.coyote > 0)) {
     h.vy = -C.JUMP_V; h.onGround = false; h.coyote = 0; h.jumpBuf = 0; h.jumping = true;
+    h.airJumps = Game.owned.doubleJump ? 1 : 0;   // grant an air jump on takeoff
     Audio.sfx('jump');
+  } else if (h.jumpBuf > 0 && !h.onGround && h.airJumps > 0) {
+    h.vy = -C.JUMP_V; h.airJumps--; h.jumpBuf = 0; h.jumping = true;
+    Audio.sfx('jump'); spawnBurst(h.x, h.y - 2, '#cfe8ff', 6);
   }
 
   // variable-height jump via 3-phase gravity
@@ -1417,6 +1460,10 @@ function drawHero() {
   let alpha = 1;
   if (h.ghost > 0) alpha = 0.35 + 0.3 * (0.5 + 0.5 * Math.sin(Game.t * 34));   // ghostly respawn
   else if (h.hurt > 0 && ((Game.t * 20) | 0) & 1) alpha = 0.35;                // i-frame flicker
+
+  ctx.save();
+  // dodge: spin the sprite in place (ninja)
+  if (h.dodgeT > 0) { const cxc = h.x, cyc = h.y - h.h / 2; ctx.translate(cxc, cyc); ctx.rotate(Game.t * 26); ctx.translate(-cxc, -cyc); }
   ctx.globalAlpha = alpha;
 
   // legs (little walk cycle on the ground)
@@ -1429,15 +1476,30 @@ function drawHero() {
   // body frame
   ctx.fillStyle = '#0a0a0a';
   ctx.fillRect(x, y, h.w, h.h - 2);
-  // interior colour — the "T" from the concept art
   const col = heroColor(h);
-  ctx.fillStyle = col;
-  ctx.fillRect(x + 2, y + 2, h.w - 4, 3);                       // top bar
-  ctx.fillRect(x + (h.w >> 1) - 1 + (h.face > 0 ? 0 : 0), y + 2, 3, h.h - 8); // stem
+  if (Game.owned.costume) {                                    // striped suit
+    for (let sx = 2; sx < h.w - 2; sx += 3) { ctx.fillStyle = ((sx >> 1) & 1) ? col : '#eee8d5'; ctx.fillRect(x + sx, y + 2, 2, h.h - 6); }
+  } else {                                                     // interior "T" from the concept art
+    ctx.fillStyle = col;
+    ctx.fillRect(x + 2, y + 2, h.w - 4, 3);                     // top bar
+    ctx.fillRect(x + (h.w >> 1) - 1, y + 2, 3, h.h - 8);        // stem
+  }
   ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.fillRect(x + 2, y + 2, h.w - 4, 1);
-  // eye dot, faces travel direction
-  ctx.fillStyle = '#fff';
-  ctx.fillRect(x + (h.face > 0 ? h.w - 4 : 2), y + 6, 2, 2);
+  ctx.fillStyle = '#fff'; ctx.fillRect(x + (h.face > 0 ? h.w - 4 : 2), y + 6, 2, 2);   // eye
+  ctx.restore();
+
+  // spiked shield in front of the facing side (not rotated)
+  if (h.shieldT > 0) {
+    const sxp = h.face > 0 ? x + h.w + 1 : x - 4;
+    ctx.fillStyle = '#c9d0da'; ctx.fillRect(sxp, y + 1, 3, h.h - 3);
+    ctx.fillStyle = '#e6ecf3'; for (let sy = y + 1; sy < y + h.h - 2; sy += 3) { const tip = sxp + (h.face > 0 ? 5 : -2); ctx.beginPath(); ctx.moveTo(tip, sy + 1); ctx.lineTo(sxp + (h.face > 0 ? 3 : 0), sy); ctx.lineTo(sxp + (h.face > 0 ? 3 : 0), sy + 2); ctx.fill(); }
+  }
+  // shield cooldown ring above the hero (until ready again)
+  if (Game.owned.shield && h.shieldCd > 0) {
+    const rcx = h.x, rcy = y - 6, frac = 1 - h.shieldCd / C.SHIELD_CD;
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(rcx, rcy, 3, 0, 7); ctx.stroke();
+    ctx.strokeStyle = '#8fd0ff'; ctx.beginPath(); ctx.arc(rcx, rcy, 3, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2); ctx.stroke();
+  }
   ctx.globalAlpha = 1;
 }
 
@@ -1648,6 +1710,7 @@ function render() {
   else if (Game.scene === 'VICTORY') centerText([{ t: 'VICTORY!', big: true, color: '#f4d03f' }, { t: 'you conquered the tower', color: '#eee8d5' }, { t: 'points ' + Game.points + '  ·  ' + MODES[Game.mode].name, color: '#93a1a1' }, { t: 'tap to return to title', color: '#93a1a1' }]);
 
   ctx.restore();
+  updateShieldButton();
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -1691,6 +1754,12 @@ function isTouchDevice() {
 function updateControlsVisibility() {
   const el = document.getElementById('controls');
   if (el) el.style.display = isTouchDevice() ? '' : 'none';
+}
+function updateShieldButton() {
+  const el = document.getElementById('btn-shield'); if (!el) return;
+  const show = isTouchDevice() && Game.owned && Game.owned.shield && Game.scene === 'PLAY';
+  el.style.display = show ? 'flex' : 'none';
+  if (show) { const cd = Game.hero.shieldCd; el.classList.toggle('cooling', cd > 0); el.textContent = cd > 0 ? String(Math.ceil(cd)) : '⛊'; }
 }
 addEventListener('resize', resize);
 addEventListener('orientationchange', resize);
