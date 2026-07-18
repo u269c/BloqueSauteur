@@ -51,7 +51,9 @@ test.describe('P5 · three stomps to die, look flips at hit 2', () => {
         const bb = window.BS.boss();
         seq.push({ hits: bb ? bb.hits : 3, enraged: bb ? bb.hits >= 2 : true, aliveBoss: !!bb });
       }
-      return { seq, level: st.level, bossAliveAfter: !!window.BS.boss() };
+      const sceneAfterKill = st.scene, levelAtClear = st.level;
+      window.BS.tapAdvance();                 // dismiss the CLEAR screen
+      return { seq, sceneAfterKill, levelAtClear, levelAfter: st.level, sceneAfter: st.scene, bossAliveAfter: !!window.BS.boss() };
     });
     expect(r.seq[0].hits).toBe(1);
     expect(r.seq[0].enraged).toBe(false);
@@ -59,7 +61,10 @@ test.describe('P5 · three stomps to die, look flips at hit 2', () => {
     expect(r.seq[1].enraged).toBe(true);      // look flips at 2 hits
     expect(r.seq[2].aliveBoss).toBe(false);   // dead at 3
     expect(r.bossAliveAfter).toBe(false);
-    expect(r.level).toBe(2);                  // defeating L1 boss advances to L2
+    expect(r.sceneAfterKill).toBe('CLEAR');   // defeat → level-clear screen
+    expect(r.levelAtClear).toBe(1);
+    expect(r.levelAfter).toBe(2);             // advancing past CLEAR → level 2
+    expect(r.sceneAfter).toBe('INTRO');
   });
 
   test('i-frames block a rapid second stomp (neg. control)', async ({ page }) => {

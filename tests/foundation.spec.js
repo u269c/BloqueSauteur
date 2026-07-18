@@ -80,12 +80,12 @@ test.describe('P1 · input → movement', () => {
 });
 
 test.describe('P1 · audio unlock on gesture', () => {
-  test('tapping the start overlay resumes the AudioContext', async ({ page }) => {
+  test('pressing PLAY resumes the AudioContext and starts the level intro', async ({ page }) => {
     await openGame(page);
     expect(await page.evaluate(() => window.BS.audioState())).toBe('none'); // not yet created
-    await page.locator('#start').click();
+    await page.locator('#play-btn').click();
     await page.waitForFunction(() => window.BS.audioState() === 'running');
     expect(await page.evaluate(() => window.BS.audioState())).toBe('running');
-    expect(await page.evaluate(() => window.BS.scene())).toBe('PLAY');       // gesture also starts game
+    expect(await page.evaluate(() => window.BS.scene())).toBe('INTRO');      // title → level intro
   });
 });
