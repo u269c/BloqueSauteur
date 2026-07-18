@@ -119,6 +119,23 @@
   .slot-card .slot-del:hover { color:#e0392f; }
   .slot-back { align-self:flex-start; background:none; border:none; color:#93a1a1; font-size:min(3.6vmin,16px); cursor:pointer; padding:0 0 1vmin; }
   .slot-back:hover { color:#eee8d5; }
+
+  /* Merchant shop */
+  .shop-bubble { background:#faf3e0; color:#2a2320; border:3px solid #2a2320; border-radius:18px; padding:3vmin; max-width:min(92vw,520px); box-shadow:0 6px 0 rgba(0,0,0,0.3); }
+  .shop-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:1.6vmin; }
+  .shop-title { font-weight:800; letter-spacing:.06em; color:#2e6b3a; font-size:min(4.6vmin,22px); }
+  .shop-points { font-weight:700; color:#b58900; font-size:min(4vmin,18px); }
+  .shop-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:2vmin; }
+  .shop-item { background:#fffaf0; border:2px solid #cdbfa0; border-radius:12px; padding:1.6vmin 1vmin; text-align:center; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:.6vmin; }
+  .shop-item:hover:not(.disabled) { border-color:#2e6b3a; background:#f2fbef; }
+  .shop-item canvas { image-rendering:pixelated; width:min(11vmin,52px); height:min(11vmin,52px); }
+  .shop-item .it-name { font-weight:700; font-size:min(3.1vmin,13px); line-height:1.1; }
+  .shop-item .it-price { font-weight:800; font-size:min(3.4vmin,15px); color:#b58900; }
+  .shop-item.owned { opacity:.55; cursor:default; }
+  .shop-item.owned .it-price { color:#2e6b3a; }
+  .shop-item.poor { opacity:.5; cursor:default; }
+  .shop-item.poor .it-price { color:#c31432; }
+  #shop-leave { margin-top:2.2vmin; }
 </style>
 </head>
 <body>
@@ -168,6 +185,14 @@
     <div class="swatches" id="swatches-pause"></div>
     <button class="play-btn" id="resume-btn">▶ RESUME</button>
     <button class="play-btn ghost" id="quit-btn">✕ QUIT TO TITLE</button>
+  </div>
+
+  <div class="overlay hidden" id="shop">
+    <div class="shop-bubble">
+      <div class="shop-head"><span class="shop-title">✦ MERCHANT ✦</span><span class="shop-points" id="shop-points">0 pts</span></div>
+      <div class="shop-grid" id="shop-grid"></div>
+      <button class="play-btn" id="shop-leave">LEAVE</button>
+    </div>
   </div>
 
 <script>
@@ -286,6 +311,17 @@ function shuffled(arr, rng) {
   return a;
 }
 
+// ── Merchant shop: 6 items (2×3), each purchasable once per slot. ──
+const SHOP_ITEMS = [
+  { key: 'shield',     name: 'Spiked Shield', price: 20,  blurb: 'DOWN arms a shield; kills the next attacker (10s cooldown)' },
+  { key: 'doubleJump', name: 'Double Jump',   price: 25,  blurb: 'Jump again in mid-air' },
+  { key: 'dodge',      name: 'Dodge',         price: 25,  blurb: 'LEFT+RIGHT: spin untouchable for ~1s' },
+  { key: 'heart',      name: 'A Heart',       price: 30,  blurb: '+1 max heart' },
+  { key: 'twoHearts',  name: 'Two Hearts',    price: 50,  blurb: '+2 max hearts' },
+  { key: 'costume',    name: 'Striped Suit',  price: 120, blurb: 'A dapper striped costume' },
+];
+const MERCHANT = { landY: CONFIG.PLAT_Y, descendV: 42, riseV: 260, hoverAmp: 22 };
+
 // Chiptune loops + jingles (TRACKS format from the reference engine: [note, beats]).
 const MUSIC = {
   title:   { bpm: 120, wave: 'square', gain: 0.22, loop: true, notes: [['E5',1],['B4',.5],['C5',.5],['D5',1],['C5',.5],['B4',.5],['A4',1],['A4',.5],['C5',.5],['E5',1],['D5',.5],['C5',.5],['B4',1.5],['R',.5]] },
@@ -297,6 +333,7 @@ const MUSIC = {
   clear:   { bpm: 140, wave: 'square', gain: 0.26, loop: false, notes: [['C5',.5],['E5',.5],['G5',.5],['C6',1],['G5',.5],['C6',1.5]] },
   victory: { bpm: 132, wave: 'square', gain: 0.28, loop: false, notes: [['C5',.5],['C5',.5],['C5',.5],['C5',1],['G4',.5],['A4',.5],['C5',1],['A4',.5],['C5',2]] },
   gameover:{ bpm: 100, wave: 'triangle', gain: 0.26, loop: false, notes: [['C5',.5],['G4',.5],['E4',.5],['C4',1.5],['R',.3],['G3',2]] },
+  merchant:{ bpm: 150, wave: 'square', gain: 0.24, loop: true, notes: [['C5',.5],['E5',.25],['G5',.25],['E5',.5],['A4',.5],['C5',.25],['E5',.25],['C5',.5],['F4',.5],['A4',.25],['C5',.25],['A4',.5],['G4',.5],['B4',.25],['D5',.25],['G5',.5]] },
 };
 
 // ══════════════════════════════════════════════════════════════════
@@ -405,8 +442,9 @@ const Game = {
   boss: null,
   spawnT: 0,                     // countdown to next spawn
   bossActive: false,            // regular spawns pause during the boss
+  merchant: null,               // active during the SHOP scene
   points: 0,
-  owned: { shield: false, doubleJump: false, dodge: false, costume: false },   // from the active slot
+  owned: { shield: false, doubleJump: false, dodge: false, heart: false, twoHearts: false, costume: false },   // from the active slot
   heartsBought: 0,
   particles: [],
   shakeT: 0, shakeMag: 0,
@@ -429,7 +467,7 @@ const Game = {
 // ── Persistence (localStorage) ────────────────────────────────────
 // Persistent progress lives in one of 3 save slots (localStorage). Muted is global.
 function freshSlot() {
-  return { points: 0, owned: { shield: false, doubleJump: false, dodge: false, costume: false }, heartsBought: 0, rainbowUnlocked: false, colorIdx: 0, mode: 'normal', best: 0 };
+  return { points: 0, owned: { shield: false, doubleJump: false, dodge: false, heart: false, twoHearts: false, costume: false }, heartsBought: 0, rainbowUnlocked: false, colorIdx: 0, mode: 'normal', best: 0 };
 }
 const Save = {
   KEY: 'bloquesauteur.save',
@@ -448,7 +486,7 @@ const Save = {
     this.data.activeSlot = i;
     const s = this.data.slots[i];
     Game.points = s.points | 0;
-    Game.owned = Object.assign({ shield: false, doubleJump: false, dodge: false, costume: false }, s.owned);
+    Game.owned = Object.assign({ shield: false, doubleJump: false, dodge: false, heart: false, twoHearts: false, costume: false }, s.owned);
     Game.heartsBought = s.heartsBought | 0;
     Game.rainbowUnlocked = !!s.rainbowUnlocked;
     Game.best = s.best | 0;
@@ -565,6 +603,7 @@ function initInput() {
   // Title / pause / HUD buttons
   const on = (id, fn) => document.getElementById(id).addEventListener('click', (e) => { e.preventDefault(); onFirstGesture(); fn(); });
   on('play-btn', () => startGame());
+  on('shop-leave', () => closeShop());
   on('slot-back', () => showSlotPanel());
   on('resume-btn', () => togglePause(false));
   on('quit-btn', () => quitToTitle());
@@ -673,6 +712,62 @@ function drawHeroPreview() {
   c.fillStyle = '#fff'; c.fillRect(x + w - 4, y + 6, 2, 2);
 }
 
+// ── Merchant shop UI ──
+function drawShopIcon(c, key) {
+  c.clearRect(0, 0, 32, 32); c.lineWidth = 2; c.lineJoin = 'round';
+  const heart = (cx, cy, s, col) => { c.fillStyle = col; c.fillRect(cx - 3 * s, cy - 2 * s, 2 * s, 1 * s); c.fillRect(cx + s, cy - 2 * s, 2 * s, 1 * s); c.fillRect(cx - 3 * s, cy - s, 6 * s, 2 * s); c.fillRect(cx - 2 * s, cy + s, 4 * s, 1 * s); c.fillRect(cx - s, cy + 2 * s, 2 * s, 1 * s); };
+  switch (key) {
+    case 'shield':
+      c.fillStyle = '#8a909b'; c.beginPath(); c.moveTo(16, 4); c.lineTo(27, 9); c.lineTo(24, 24); c.lineTo(16, 29); c.lineTo(8, 24); c.lineTo(5, 9); c.closePath(); c.fill();
+      c.fillStyle = '#c9d0da'; c.fillRect(14, 9, 4, 14);
+      c.strokeStyle = '#e0e6ee'; for (let i = 0; i < 6; i++) { const a = (i / 6) * 6.283; c.strokeRect(16 + Math.cos(a) * 11 - 1, 15 + Math.sin(a) * 11 - 1, 2, 2); }
+      break;
+    case 'doubleJump':
+      c.strokeStyle = '#39a0ed'; c.lineWidth = 3;
+      c.beginPath(); c.moveTo(8, 18); c.lineTo(16, 10); c.lineTo(24, 18); c.stroke();
+      c.beginPath(); c.moveTo(8, 26); c.lineTo(16, 18); c.lineTo(24, 26); c.stroke();
+      break;
+    case 'dodge':
+      c.strokeStyle = '#b58ce0'; c.lineWidth = 3; c.beginPath(); c.arc(16, 16, 9, 0.6, 6.0); c.stroke();
+      c.fillStyle = '#b58ce0'; c.beginPath(); c.moveTo(24, 10); c.lineTo(27, 15); c.lineTo(21, 15); c.closePath(); c.fill();
+      c.fillStyle = '#2a2320'; c.fillRect(12, 12, 8, 3);   // ninja mask band
+      break;
+    case 'heart': heart(16, 15, 2, '#e0392f'); break;
+    case 'twoHearts': heart(11, 13, 1.6, '#e0392f'); heart(21, 18, 1.6, '#e0392f'); break;
+    case 'costume':
+      c.fillStyle = '#3a3f48'; c.fillRect(8, 8, 16, 18);
+      c.fillStyle = '#f4d03f'; for (let sx = 9; sx < 24; sx += 4) c.fillRect(sx, 8, 2, 18);
+      c.fillStyle = '#3a3f48'; c.fillRect(5, 8, 5, 6); c.fillRect(22, 8, 5, 6);   // sleeves
+      break;
+  }
+}
+function buyItem(key) {
+  const item = SHOP_ITEMS.find((i) => i.key === key); if (!item) return;
+  if (Game.owned[key] || Game.points < item.price) return;
+  Game.points -= item.price; Game.owned[key] = true;
+  if (key === 'heart') { Game.heartsBought += 1; Game.hp = maxHearts(); }
+  if (key === 'twoHearts') { Game.heartsBought += 2; Game.hp = maxHearts(); }
+  if (Game.merchant) Game.merchant.bought = true;
+  Audio.sfx('buy'); Save.save(); buildShop();
+}
+function buildShop() {
+  const grid = document.getElementById('shop-grid'); if (!grid) return;
+  const pts = document.getElementById('shop-points'); if (pts) pts.textContent = Game.points + ' pts';
+  grid.innerHTML = '';
+  for (const item of SHOP_ITEMS) {
+    const owned = !!Game.owned[item.key], poor = !owned && Game.points < item.price;
+    const cell = document.createElement('div');
+    cell.className = 'shop-item' + (owned ? ' owned' : '') + (poor ? ' poor' : '');
+    cell.dataset.key = item.key;
+    const cv = document.createElement('canvas'); cv.width = 32; cv.height = 32; drawShopIcon(cv.getContext('2d'), item.key);
+    const nm = document.createElement('div'); nm.className = 'it-name'; nm.textContent = item.name;
+    const pr = document.createElement('div'); pr.className = 'it-price'; pr.textContent = owned ? 'OWNED' : (item.price + ' pts');
+    cell.title = item.blurb; cell.appendChild(cv); cell.appendChild(nm); cell.appendChild(pr);
+    if (!owned && !poor) cell.addEventListener('click', (e) => { e.preventDefault(); onFirstGesture(); buyItem(item.key); });
+    grid.appendChild(cell);
+  }
+}
+
 function updateHudButtons() {
   const m = document.getElementById('mute-btn');
   if (m) { m.textContent = '♪'; m.classList.toggle('off', Audio.muted); }
@@ -772,6 +867,10 @@ const Audio = {
       case 'bossSpawn': this.blip(n('C3'), .18, 'sawtooth', .45, t0); this.blip(n('G3'), .18, 'sawtooth', .4, t0 + .12); this.blip(n('C4'), .24, 'square', .4, t0 + .24); break;
       case 'bossHit':   this.blip(n('E5'), .06, 'square', .42, t0); this.blip(n('A4'), .12, 'sawtooth', .35, t0 + .05); break;
       case 'bossDie':   this.blip(n('C4'), .1, 'square', .45, t0); this.blip(n('E4'), .1, 'square', .45, t0 + .1); this.blip(n('G4'), .1, 'square', .45, t0 + .2); this.blip(n('C5'), .4, 'square', .45, t0 + .3); break;
+      case 'buzz':      this.blip(n('A3'), .07, 'square', .25, t0); this.blip(n('C4'), .07, 'square', .22, t0 + .06); break;
+      case 'buy':       this.blip(n('E5'), .06, 'square', .4, t0); this.blip(n('A5'), .1, 'square', .35, t0 + .06); break;
+      case 'buzzThanks':this.blip(n('C5'), .07, 'square', .3, t0); this.blip(n('E5'), .07, 'square', .3, t0 + .08); this.blip(n('G5'), .1, 'square', .3, t0 + .16); break;
+      case 'buzzGrumpy':this.blip(n('E3'), .18, 'sawtooth', .4, t0); this.blip(n('C3'), .26, 'sawtooth', .4, t0 + .1); break;
       default:      this.blip(n('A4'), .06, 'square', .3, t0);
     }
   },
@@ -819,8 +918,35 @@ function onBossDefeated() {
   Game.scene = 'CLEAR'; Game.sceneT = 0;
   Audio.sfx('bossDie'); Audio.playMusic('clear');
 }
-function afterClear() {
-  if (Game.level >= 4) { Game.scene = 'VICTORY'; Game.sceneT = 0; Audio.playMusic('victory'); return; }
+function afterClear() { gotoShop(); }              // merchant visits after every level
+
+function gotoShop() {
+  Game.scene = 'SHOP'; Game.sceneT = 0; Game.paused = false;
+  Game.merchant = {
+    x: 40 + Math.random() * (CONFIG.W - 80), y: -34,
+    landX: Math.max(60, Math.min(CONFIG.W - 60, Game.hero.x + 40)),
+    state: 'descend', bought: false, t0: 0,
+  };
+  Audio.playMusic('merchant');
+}
+function updateMerchant(dt) {
+  const m = Game.merchant; if (!m) return;
+  if (m.state === 'descend') {
+    m.y += MERCHANT.descendV * dt;
+    m.x += (m.landX - m.x) * Math.min(1, dt * 1.5) + Math.sin(Game.sceneT * 4) * MERCHANT.hoverAmp * dt;
+    if (m.y >= MERCHANT.landY - 4) { m.y = MERCHANT.landY - 4; m.state = 'shop'; Audio.sfx('buzz'); showOverlay('shop'); buildShop(); }
+  } else if (m.state === 'ascend') {
+    m.y -= MERCHANT.riseV * dt;
+    if (m.y < -40) { Game.merchant = null; afterShop(); }
+  }
+}
+function closeShop() {
+  hideOverlay('shop');
+  const m = Game.merchant; if (m) m.state = 'ascend';
+  Audio.sfx(m && m.bought ? 'buzzThanks' : 'buzzGrumpy');
+}
+function afterShop() {
+  if (Game.level >= 4) { Game.scene = 'VICTORY'; Game.sceneT = 0; Audio.stopMusic(); Audio.playMusic('victory'); return; }
   Game.level++;
   gotoIntro();
 }
@@ -1102,6 +1228,7 @@ function update(dt) {
   // transient screens auto-advance (tap advances sooner via tapAdvance)
   if (Game.scene === 'INTRO' && Game.sceneT >= 1.6) { gotoPlay(); return; }
   if (Game.scene === 'CLEAR' && Game.sceneT >= 2.4) { afterClear(); return; }
+  if (Game.scene === 'SHOP') { updateMerchant(dt); return; }
   if (Game.scene !== 'PLAY' || Game.paused) return;
 
   const h = Game.hero, C = CONFIG;
@@ -1469,6 +1596,26 @@ function drawSpawner(x) {
   ctx.fillRect(x - 9, sy + 4, 18, 3);
 }
 
+function drawMerchant() {
+  const m = Game.merchant; if (!m) return;
+  const x = Math.round(m.x), y = Math.round(m.y);
+  // red parachute canopy + strings (shown while airborne)
+  if (m.state !== 'shop') {
+    ctx.strokeStyle = '#111'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x - 5, y - 8); ctx.lineTo(x - 12, y - 26); ctx.moveTo(x + 5, y - 8); ctx.lineTo(x + 12, y - 26); ctx.stroke();
+    ctx.fillStyle = '#c31432'; ctx.beginPath(); ctx.moveTo(x - 16, y - 26); ctx.quadraticCurveTo(x, y - 44, x + 16, y - 26); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#8a0f24'; ctx.fillRect(x - 16, y - 27, 32, 2);
+  }
+  // green blocky body (eye + orange/red accents + little legs) — per IMG_0052
+  ctx.fillStyle = '#0a0a0a'; ctx.fillRect(x - 3, y + 6, 3, 4); ctx.fillRect(x + 1, y + 6, 3, 4);   // legs
+  ctx.fillStyle = '#2e6b3a'; ctx.fillRect(x - 7, y - 8, 14, 15);                                    // body
+  ctx.fillStyle = '#0a0a0a'; ctx.strokeStyle = '#0a0a0a'; ctx.lineWidth = 1; ctx.strokeRect(x - 7 + 0.5, y - 8 + 0.5, 13, 14);
+  ctx.fillStyle = '#c31432'; ctx.fillRect(x + 1, y - 6, 4, 2);                                      // red accent
+  ctx.fillStyle = '#e8912a'; ctx.fillRect(x - 6, y + 1, 3, 4);                                      // orange satchel
+  ctx.fillStyle = '#fff'; ctx.fillRect(x - 2, y - 4, 4, 4);                                         // eye
+  ctx.fillStyle = '#2a7fd0'; ctx.fillRect(x - 1, y - 3, 2, 2);                                      // blue pupil
+}
+
 function render() {
   const C = CONFIG;
   ctx.save();
@@ -1487,11 +1634,12 @@ function render() {
   drawSpawner(C.SPAWN_X);
   if (MODES[Game.mode].spawners === 2) drawSpawner(C.SPAWN_X_L);
 
-  const live = Game.scene === 'PLAY' || Game.scene === 'INTRO' || Game.scene === 'CLEAR';
+  const live = Game.scene === 'PLAY' || Game.scene === 'INTRO' || Game.scene === 'CLEAR' || Game.scene === 'SHOP';
   if (live) { drawEnemies(); drawBoss(); drawHero(); }
+  if (Game.scene === 'SHOP') drawMerchant();
   drawParticles();
 
-  if (Game.scene === 'PLAY' || Game.scene === 'INTRO' || Game.scene === 'CLEAR') drawHUD();
+  if (live) drawHUD();
 
   // Scene overlays (canvas-drawn transient screens)
   if (Game.scene === 'INTRO') centerText([{ t: 'LEVEL ' + Game.level, big: true, color: '#f4d03f' }, { t: (WORLDS[Game.theme.world] || {}).name + ' · ' + (SKY_NAMES[Game.theme.sky] || ''), color: '#eee8d5' }, { t: 'survive 60 seconds, then the boss', color: '#93a1a1' }]);
@@ -1591,7 +1739,9 @@ window.BS = {
   // Flow controls
   start: startPlay,          // straight into PLAY (deterministic test entry)
   startGame,                 // real title→intro flow
-  gotoPlay, tapAdvance, gotoTitle,
+  gotoPlay, tapAdvance, gotoTitle, gotoShop, closeShop,
+  merchant: () => Game.merchant,
+  SHOP_ITEMS, buyItem, buildShop,
   pause: togglePause,
   isPaused: () => Game.paused,
   buildSwatches,
