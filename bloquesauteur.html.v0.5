@@ -214,9 +214,9 @@ const BOSS = {
 // Difficulty modes (chosen on the title screen). Health is measured in hearts
 // (fractional). bossHits is indexed by level (1..4).
 const MODES = {
-  easy:   { name: 'EASY',      hitDamage: 0,    knockOnHit: false, perfectBonus: true,  spawners: 1, pointPenalty: 0, bossHits: { 1: 3, 2: 3, 3: 3, 4: 3 }, musicRate: 1.0,  musicWave: null },
-  normal: { name: 'NORMAL',    hitDamage: 0.25, knockOnHit: true,  perfectBonus: true,  spawners: 1, pointPenalty: 0, bossHits: { 1: 3, 2: 4, 3: 5, 4: 6 }, musicRate: 1.14, musicWave: null },
-  rage:   { name: 'RAGE MODE', hitDamage: 0.5,  knockOnHit: true,  perfectBonus: false, spawners: 2, pointPenalty: 1, bossHits: { 1: 6, 2: 8, 3: 10, 4: 12 }, musicRate: 1.3, musicWave: 'sawtooth' },
+  easy:   { name: 'EASY',      hitDamage: 0,    knockOnHit: false, perfectBonus: true,  spawners: 1, bossHits: { 1: 3, 2: 3, 3: 3, 4: 3 }, musicRate: 1.0,  musicWave: null },
+  normal: { name: 'NORMAL',    hitDamage: 0.25, knockOnHit: true,  perfectBonus: true,  spawners: 1, bossHits: { 1: 3, 2: 4, 3: 5, 4: 6 }, musicRate: 1.14, musicWave: null },
+  rage:   { name: 'RAGE MODE', hitDamage: 0.5,  knockOnHit: true,  perfectBonus: false, spawners: 2, bossHits: { 1: 6, 2: 8, 3: 10, 4: 12 }, musicRate: 1.3, musicWave: 'sawtooth' },
 };
 
 const LEVEL_NAMES = { 1: 'THE SHALLOWS', 2: 'BROKEN GROUND', 3: 'THE GAPS', 4: 'INFERNO' };
@@ -338,7 +338,7 @@ const Game = {
   boss: null,
   spawnT: 0,                     // countdown to next spawn
   bossActive: false,            // regular spawns pause during the boss
-  points: 0,
+  kills: 0,
   particles: [],
   shakeT: 0, shakeMag: 0,
   sceneT: 0,                     // time in the current transient scene (INTRO/CLEAR/…)
@@ -527,7 +527,7 @@ function updateHudButtons() {
 // ══════════════════════════════════════════════════════════════════
 const Audio = {
   ctx: null, master: null, sfxGain: null, musicGain: null, muted: false, unlocked: false,
-  music: { key: null, playing: false, timer: null, oscs: [] },
+  music: { key: null, playing: false, timer: null },
   ensure() {
     if (!this.ctx) {
       const AC = window.AudioContext || window.webkitAudioContext;
@@ -561,11 +561,9 @@ const Audio = {
   _loop(track, t0) {
     const beat = 60 / (track.bpm * (this.music.rate || 1)); let t = t0;
     const wave = this.music.wave || track.wave;
-    // prune finished oscillators so the ref list stays bounded
-    this.music.oscs = this.music.oscs.filter((o) => o.__end > this.ctx.currentTime);
     for (const [note, beats] of track.notes) {
       const dur = beats * beat;
-      if (note !== 'R') { const o = this._note(this.noteToFreq(note), dur, wave, track.gain, t, this.musicGain); if (o) this.music.oscs.push(o); }
+      if (note !== 'R') this._note(this.noteToFreq(note), dur, wave, track.gain, t, this.musicGain);
       t += dur;
     }
     const ms = (t - this.ctx.currentTime) * 1000;
@@ -574,16 +572,9 @@ const Audio = {
       if (track.loop) this._loop(track, t); else this.music.playing = false;
     }, Math.max(20, ms - 100));
   },
-  // Hard-stop: cancel the next iteration AND stop every already-scheduled music
-  // oscillator, so a new track can't overlap the tail of the old one.
-  stopMusic() {
-    this.music.playing = false;
-    if (this.music.timer) { clearTimeout(this.music.timer); this.music.timer = null; }
-    for (const o of this.music.oscs) { try { o.stop(); } catch (e) { /* already stopped */ } }
-    this.music.oscs = []; this.music.key = null;
-  },
+  stopMusic() { this.music.playing = false; if (this.music.timer) { clearTimeout(this.music.timer); this.music.timer = null; } this.music.key = null; },
   _note(freq, dur, wave, gain, when, dest) {
-    if (!this.ctx || !freq) return null;
+    if (!this.ctx || !freq) return;
     const t = when != null ? when : this.ctx.currentTime;
     const osc = this.ctx.createOscillator(), g = this.ctx.createGain();
     osc.type = wave || 'square'; osc.frequency.value = freq;
@@ -591,8 +582,6 @@ const Audio = {
     g.gain.setValueAtTime(gain != null ? gain : 0.5, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + dur * 0.9);
     osc.start(t); osc.stop(t + dur + 0.03);
-    osc.__end = t + dur + 0.03;
-    return osc;
   },
   noteToFreq(name) {
     const S = { C:0, D:2, E:4, F:5, G:7, A:9, B:11 };
@@ -628,7 +617,7 @@ const Audio = {
 function firstGesture() { Audio.ensure(); }   // unlock audio on the very first gesture
 
 function startGame() {                         // TITLE → level 1
-  Game.level = 1; Game.hp = CONFIG.LIVES_START; Game.points = 0;
+  Game.level = 1; Game.hp = CONFIG.LIVES_START; Game.kills = 0;
   reseed(pickSeed());
   hideOverlay('start');
   Audio.sfx('start');
@@ -645,7 +634,7 @@ function gotoPlay() { Game.scene = 'PLAY'; Game.t = 0; }
 
 // Fast entry straight into PLAY — used by the deterministic test harness.
 function startPlay() {
-  Game.level = 1; Game.hp = CONFIG.LIVES_START; Game.points = 0;
+  Game.level = 1; Game.hp = CONFIG.LIVES_START; Game.kills = 0;
   reseed(pickSeed());
   Game.scene = 'PLAY'; Game.t = 0; Game.sceneT = 0; Game.paused = false; Game.hero.face = 1;
   hideOverlay('start');
@@ -653,7 +642,6 @@ function startPlay() {
 
 function onBossDefeated() {
   Game.bossActive = false;
-  Game.points += 5;                             // bosses are worth 5 points
   Game.gainedLife = !Game.hitThisLevel && MODES[Game.mode].perfectBonus;
   if (Game.gainedLife) Game.hp += 1;            // no-hit-level bonus (may exceed 3; not in RAGE)
   Game.scene = 'CLEAR'; Game.sceneT = 0;
@@ -769,7 +757,6 @@ function heroHurt(fromRight) {
   if (m.knockOnHit) { h.knock = C.KNOCK_LOCK; h.vx = (fromRight ? -1 : 1) * C.KNOCKBACK; h.vy = -140; h.onGround = false; }
   Game.hitThisLevel = true;
   Game.hp = Math.max(0, Game.hp - m.hitDamage);                    // lose a fraction of a heart
-  if (m.pointPenalty) Game.points = Math.max(0, Game.points - m.pointPenalty);   // RAGE: −1 point per hit
   Audio.sfx('hurt'); shake(3);
   if (Game.hp <= 0) { Game.hp = 0; h.dead = true; onGameOver(); } // out of health → game over
   return true;
@@ -840,7 +827,7 @@ function updateEnemies(dt) {
       const hl = h.x - h.w / 2, hr = h.x + h.w / 2, htop = h.y - h.h, hbot = h.y;
       if (hr > el && hl < er && hbot > etop && htop < ebot) {
         const stomp = h.vy > 0 && h.y < e.y - e.r;   // falling onto its top half
-        if (stomp) { e.alive = false; h.vy = -ENEMY.bounce; h.onGround = false; Game.points++; Audio.sfx('stomp'); spawnBurst(e.x, e.y - e.r, ENEMY_COL[e.type] || '#fff', 12); shake(3); }
+        if (stomp) { e.alive = false; h.vy = -ENEMY.bounce; h.onGround = false; Game.kills++; Audio.sfx('stomp'); spawnBurst(e.x, e.y - e.r, ENEMY_COL[e.type] || '#fff', 12); shake(3); }
         else heroHurt(e.x > h.x);                     // hit → knock away from the enemy
       }
     }
@@ -879,11 +866,9 @@ function updateBoss(dt) {
   const phase2 = b.hits >= Math.ceil(b.maxHits * 2 / 3);   // enraged in the last third of its health
   const spd = (BOSS.charge[b.type] || 60) * (phase2 ? 1.28 : 1);
 
-  // gravity + floor: the boss FOLLOWS the platform surface (walks up/down hills
-  // and mini-platforms) but bridges holes at the base line — so it never falls
-  // into the hazard and strands the fight, and never "flies" over raised terrain.
-  const surf = surfaceAt(ter, b.x);
-  const floorY = (surf != null) ? surf : ter.baseTop;
+  // gravity + floor. The boss floats at the base platform line (ignores holes)
+  // so it can never fall into the lava and strand the fight in an unwinnable state.
+  const floorY = ter.baseTop;
   b.vy += ENEMY.gravity * dt; b.y += b.vy * dt;
   if (b.y >= floorY) { b.y = floorY; b.vy = 0; b.onGround = true; } else b.onGround = false;
 
@@ -1031,8 +1016,16 @@ function drawTerrain() {
   const C = CONFIG, ter = Game.terrain;
   if (!ter) return;
   const segs = ter.segments, d = DECO[ter.level] || DECO[1];
-  // Holes are left open — the sky/horizon and the hazard band (drawn earlier in
-  // render()) show straight through the gap.
+  // Hole chutes (dark shafts with a lava glow at the bottom).
+  for (let i = 0; i < segs.length - 1; i++) {
+    const hx0 = segs[i].x1, hx1 = segs[i + 1].x0;
+    if (hx1 <= hx0) continue;
+    ctx.fillStyle = '#180a10';
+    ctx.fillRect(hx0, C.PLAT_Y - 2, hx1 - hx0, C.LAVA_Y - (C.PLAT_Y - 2));
+    const glow = 0.5 + 0.5 * Math.sin(Game.t * 4 + hx0);
+    ctx.fillStyle = `rgba(244,120,0,${0.25 + 0.35 * glow})`;
+    ctx.fillRect(hx0, C.LAVA_Y - 14, hx1 - hx0, 14);
+  }
   // Solid columns per segment.
   for (const s of segs) {
     const w = s.x1 - s.x0;
@@ -1178,18 +1171,11 @@ function drawParticles() {
 }
 
 // fill in [0,1] — draws an empty heart then clips a left-anchored fraction in red.
-// fill in [0,1] — empty heart, then a clockwise PIE wedge of red from 12 o'clock.
 function drawHeart(x, y, fill) {
-  const px = () => { ctx.fillRect(x + 1, y, 2, 1); ctx.fillRect(x + 5, y, 2, 1); ctx.fillRect(x, y + 1, 8, 3); ctx.fillRect(x + 1, y + 4, 6, 1); ctx.fillRect(x + 2, y + 5, 4, 1); ctx.fillRect(x + 3, y + 6, 2, 1); };
+  const px = (fx) => { ctx.fillRect(x + 1, y, 2, 1); ctx.fillRect(x + 5, y, 2, 1); ctx.fillRect(x, y + 1, 8, 3); ctx.fillRect(x + 1, y + 4, 6, 1); ctx.fillRect(x + 2, y + 5, 4, 1); ctx.fillRect(x + 3, y + 6, 2, 1); };
   ctx.fillStyle = 'rgba(255,255,255,0.18)'; px();                 // empty base
   fill = Math.max(0, Math.min(1, fill));
-  if (fill >= 1) { ctx.fillStyle = '#e0392f'; px(); return; }
-  if (fill > 0) {
-    const cx = x + 4, cy = y + 3.5, r = 7, a0 = -Math.PI / 2;      // start at top, sweep clockwise
-    ctx.save(); ctx.beginPath(); ctx.moveTo(cx, cy);
-    ctx.arc(cx, cy, r, a0, a0 + fill * Math.PI * 2); ctx.closePath(); ctx.clip();
-    ctx.fillStyle = '#e0392f'; px(); ctx.restore();
-  }
+  if (fill > 0) { ctx.save(); ctx.beginPath(); ctx.rect(x, y, 8 * fill, 7); ctx.clip(); ctx.fillStyle = '#e0392f'; px(); ctx.restore(); }
 }
 
 function drawHUD() {
@@ -1202,7 +1188,7 @@ function drawHUD() {
   if (Game.hp > 8) ctx.fillText('+' + (Math.ceil(Game.hp) - 8), 6 + 8 * 11 + 1, 7);
   // level name + score (top-left, second row; kept clear of the top-right buttons)
   ctx.fillStyle = '#93a1a1'; ctx.fillText('LV' + Game.level + ' ' + (LEVEL_NAMES[Game.level] || ''), 6, 18);
-  ctx.fillStyle = '#8a9ba0'; ctx.fillText('POINTS ' + Game.points, 6, 28);
+  ctx.fillStyle = '#8a9ba0'; ctx.fillText('KILLS ' + Game.kills, 6, 28);
   // timer / boss flag (centre)
   if (Game.scene === 'PLAY') {
     if (Game.bossActive) { ctx.textAlign = 'center'; ctx.fillStyle = '#e0392f'; ctx.font = '10px monospace'; ctx.fillText('◆ BOSS ◆', C.W / 2, 7); ctx.textAlign = 'left'; }
@@ -1267,9 +1253,9 @@ function render() {
 
   // Scene overlays (canvas-drawn transient screens)
   if (Game.scene === 'INTRO') centerText([{ t: 'LEVEL ' + Game.level, big: true, color: '#f4d03f' }, { t: LEVEL_NAMES[Game.level] || '', color: '#eee8d5' }, { t: 'survive 60 seconds, then the boss', color: '#93a1a1' }]);
-  else if (Game.scene === 'CLEAR') centerText([{ t: 'LEVEL CLEAR', big: true, color: '#7cb342' }].concat(Game.gainedLife ? [{ t: '★ no-hit bonus: +1 heart! ★', color: '#f4d03f' }] : [{ t: 'points ' + Game.points, color: '#93a1a1' }]));
+  else if (Game.scene === 'CLEAR') centerText([{ t: 'LEVEL CLEAR', big: true, color: '#7cb342' }].concat(Game.gainedLife ? [{ t: '★ no-hit bonus: +1 heart! ★', color: '#f4d03f' }] : [{ t: 'kills ' + Game.kills, color: '#93a1a1' }]));
   else if (Game.scene === 'GAMEOVER') centerText([{ t: 'GAME OVER', big: true, color: '#e0392f' }, { t: 'reached level ' + Game.level, color: '#eee8d5' }, { t: 'tap to return to title', color: '#93a1a1' }]);
-  else if (Game.scene === 'VICTORY') centerText([{ t: 'VICTORY!', big: true, color: '#f4d03f' }, { t: 'you conquered the tower', color: '#eee8d5' }, { t: 'points ' + Game.points + '  ·  ' + MODES[Game.mode].name, color: '#93a1a1' }, { t: 'tap to return to title', color: '#93a1a1' }]);
+  else if (Game.scene === 'VICTORY') centerText([{ t: 'VICTORY!', big: true, color: '#f4d03f' }, { t: 'you conquered the tower', color: '#eee8d5' }, { t: 'kills ' + Game.kills + '  ·  ' + MODES[Game.mode].name, color: '#93a1a1' }, { t: 'tap to return to title', color: '#93a1a1' }]);
 
   ctx.restore();
 }
@@ -1305,16 +1291,6 @@ function resize() {
   canvas.style.height = Math.floor(CONFIG.H * scale) + 'px';
   const portrait = vh > vw;
   document.getElementById('rotate').classList.toggle('show', portrait);
-  updateControlsVisibility();
-}
-// Touch controls only make sense on touch devices — hide them on desktop (keyboard).
-function isTouchDevice() {
-  return ('ontouchstart' in window) || (navigator.maxTouchPoints > 0) ||
-         (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
-}
-function updateControlsVisibility() {
-  const el = document.getElementById('controls');
-  if (el) el.style.display = isTouchDevice() ? '' : 'none';
 }
 addEventListener('resize', resize);
 addEventListener('orientationchange', resize);

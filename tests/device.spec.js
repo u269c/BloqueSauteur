@@ -6,6 +6,7 @@ const { openGame } = require('./helpers');
 
 test('layout: no horizontal page scroll; canvas + controls fit the viewport', async ({ page }) => {
   await openGame(page, { seed: 1 });
+  await expect(page.locator('#controls')).toBeVisible();   // touch device → movement buttons shown
   const m = await page.evaluate(() => ({
     scrollW: document.documentElement.scrollWidth,
     innerW: window.innerWidth, innerH: window.innerHeight,
