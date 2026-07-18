@@ -63,12 +63,12 @@ test.describe('P4 · stomp vs hurt classification', () => {
       Object.assign(e, { x: 240, y: C.PLAT_Y, vx: 0, vy: 0, onGround: true });
       // place hero overlapping the enemy's top, descending
       Object.assign(h, { x: 240, y: C.PLAT_Y - e.r - 3, vy: 60 });
-      const kills0 = st.kills;
+      const points0 = st.points;
       window.BS.stepFixed(2);
-      return { alive: e.alive, kills: st.kills - kills0, heroVy: h.vy, hp: st.hp, heroHurt: h.hurt };
+      return { alive: e.alive, points: st.points - points0, heroVy: h.vy, hp: st.hp, heroHurt: h.hurt };
     });
     expect(r.alive).toBe(false);          // enemy killed
-    expect(r.kills).toBe(1);
+    expect(r.points).toBe(1);             // a stomp is worth 1 point
     expect(r.heroVy).toBeLessThan(0);     // hero bounced up
     expect(r.hp).toBe(3);                 // stomping costs no health
     expect(r.heroHurt).toBe(0);           // and does not hurt the hero
