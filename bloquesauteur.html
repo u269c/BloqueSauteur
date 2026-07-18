@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>BloqueSauteur</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-user-select:none; user-select:none; -webkit-tap-highlight-color:transparent; }
+  html, body { width:100%; height:100%; overflow:hidden; background:#0a0a12; touch-action:none; overscroll-behavior:none; }
+  body { display:flex; align-items:center; justify-content:center; font-family:system-ui,-apple-system,sans-serif; }
+  #game {
+    display:block; background:#000;
+    image-rendering:pixelated; image-rendering:crisp-edges;
+    touch-action:none;
+  }
+
+  /* ── Touch controls (also work with mouse) ─────────────────────── */
+  #controls { position:fixed; inset:0; pointer-events:none; z-index:10; }
+  .btn {
+    position:absolute; pointer-events:auto;
+    display:flex; align-items:center; justify-content:center;
+    color:#fff; font-size:34px; font-weight:700;
+    background:rgba(255,255,255,0.08); border:2px solid rgba(255,255,255,0.22);
+    border-radius:16px; backdrop-filter:blur(2px);
+    width:19vmin; height:19vmin; min-width:74px; min-height:74px;
+    transition:background .05s;
+  }
+  .btn.pressed { background:rgba(255,255,255,0.28); }
+  #btn-left  { left:3vmin;  bottom:4vmin; }
+  #btn-right { left:24vmin; bottom:4vmin; }
+  #btn-jump  { right:3vmin; bottom:4vmin; width:22vmin; height:22vmin; }
+
+  /* ── Overlays ──────────────────────────────────────────────────── */
+  .overlay {
+    position:fixed; inset:0; z-index:20;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:2.4vmin; text-align:center; color:#eee8d5; padding:6vmin;
+    background:rgba(6,8,18,0.72);
+  }
+  .overlay.hidden { display:none; }
+  .overlay h1 { font-size:min(11vmin,74px); letter-spacing:.06em; color:#f4d03f; text-shadow:3px 3px 0 #d63031; }
+  .overlay p  { font-size:min(4.4vmin,22px); color:#b6c2c6; max-width:32ch; line-height:1.5; }
+  .overlay .hint { font-size:min(3.6vmin,17px); color:#7a8a90; }
+  .pulse { animation:pulse 1.1s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:.55} 50%{opacity:1} }
+
+  /* Portrait hint (non-blocking, informational) */
+  #rotate { position:fixed; top:0; left:0; right:0; z-index:15; pointer-events:none;
+    text-align:center; font-size:min(3.4vmin,15px); color:#f4d03f; padding:6px;
+    background:rgba(6,8,18,0.6); display:none; }
+  @media (orientation:portrait) { #rotate.show { display:block; } }
+</style>
+</head>
+<body>
+  <canvas id="game" width="480" height="270"></canvas>
+
+  <div id="rotate">↻ Rotate to landscape for the best view</div>
+
+  <div id="controls" aria-hidden="true">
+    <div class="btn" id="btn-left">◀</div>
+    <div class="btn" id="btn-right">▶</div>
+    <div class="btn" id="btn-jump">▲</div>
+  </div>
+
+  <div class="overlay" id="start">
+    <h1>BLOQUE&nbsp;SAUTEUR</h1>
+    <p>Survive the tower. Stomp the monsters into the lava.</p>
+    <p class="hint">Arrow keys ← → to move, ↑ to jump &nbsp;·&nbsp; or use the on-screen buttons</p>
+    <p class="pulse" style="font-size:min(5vmin,24px);color:#f4d03f">▶ Tap / press any key to start</p>
+  </div>
+
+<script>
+"use strict";
+(function () {
+
+// ══════════════════════════════════════════════════════════════════
+//  RNG — deterministic, seedable (mulberry32)
+// ══════════════════════════════════════════════════════════════════
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function pickSeed() {
+  const q = new URLSearchParams(location.search).get('seed');
+  if (q !== null && q !== '' && Number.isFinite(+q)) return (+q) >>> 0;
+  return (Math.floor(Math.random() * 0xffffffff)) >>> 0;
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  CONFIG — logical dimensions, physics, world layout, palette
+// ══════════════════════════════════════════════════════════════════
+const CONFIG = {
+  W: 480, H: 270, TILE: 16,
+  DT: 1 / 120,                       // fixed physics timestep (s)
+  // World layout (logical px). Tower is central; lava fills both flanks.
+  PLAT_Y: 178,                       // platform top surface
+  PLAT_X0: 60, PLAT_X1: 420,         // platform span (off either edge = lava)
+  LAVA_Y: 236,                       // lava surface level
+  SPAWN_X: 398, SPAWN_Y: 96,         // spawner cube centre
+  // Physics (tuned properly in P3/P7; placeholder-friendly here)
+  GRAVITY: 900, MOVE_SPEED: 96, JUMP_V: 330,
+  // Meta
+  LIVES_START: 3, LEVEL_TIME: 60, RESPAWN_GHOST: 2.0,
+};
+
+// 3×3 solid colours + rainbow (index 9), per concept art IMG_0049.
+const PALETTE = [
+  { name: 'blue',   css: '#39a0ed' },
+  { name: 'green',  css: '#2e7d32' },
+  { name: 'black',  css: '#1a1a1a' },
+  { name: 'yellow', css: '#f4d03f' },
+  { name: 'orange', css: '#e8731e' },
+  { name: 'pink',   css: '#e0348b' },
+  { name: 'slate',  css: '#455a64' },
+  { name: 'red',    css: '#d63031' },
+  { name: 'lime',   css: '#7cb342' },
+  { name: 'rainbow', rainbow: true },
+];
+
+// ══════════════════════════════════════════════════════════════════
+//  STATE
+// ══════════════════════════════════════════════════════════════════
+const Game = {
+  scene: 'TITLE',        // TITLE | PLAY | (PAUSE handled by flag)
+  paused: false,
+  seed: 0,
+  rand: null,            // active PRNG (reseeded per game)
+  t: 0,                  // seconds elapsed in current scene
+  level: 1,
+  lives: CONFIG.LIVES_START,
+  // Placeholder hero (real physics arrives in P3) — proves loop↔input↔render.
+  hero: { x: 240, y: CONFIG.PLAT_Y, vx: 0, vy: 0, w: 14, h: 18, onGround: true, face: 1, colorIdx: 0 },
+  fps: 0,
+};
+
+function reseed(seed) { Game.seed = seed >>> 0; Game.rand = mulberry32(Game.seed); }
+
+// ══════════════════════════════════════════════════════════════════
+//  INPUT — arrow keys / WASD / space  +  on-screen touch buttons
+// ══════════════════════════════════════════════════════════════════
+const Input = {
+  left: false, right: false, jumpHeld: false,
+  _jumpQueued: false,          // rising-edge latch, consumed by hero
+  _sources: { kb: {}, touch: {} },
+  press(action, on) {
+    if (action === 'jump') {
+      if (on && !this.jumpHeld) this._jumpQueued = true;
+      this.jumpHeld = on;
+    } else if (action === 'left') this.left = on;
+    else if (action === 'right') this.right = on;
+  },
+  consumeJump() { const q = this._jumpQueued; this._jumpQueued = false; return q; },
+  reset() { this.left = this.right = this.jumpHeld = false; this._jumpQueued = false; },
+};
+
+const KEYMAP = {
+  ArrowLeft: 'left', KeyA: 'left',
+  ArrowRight: 'right', KeyD: 'right',
+  ArrowUp: 'jump', KeyW: 'jump', Space: 'jump',
+};
+
+function initInput() {
+  addEventListener('keydown', (e) => {
+    if (e.repeat) return;
+    firstGesture();
+    if (e.code === 'KeyP') { togglePause(); return; }
+    if (e.code === 'KeyM') { Audio.toggleMute(); return; }
+    const a = KEYMAP[e.code];
+    if (a) { e.preventDefault(); Input.press(a, true); }
+  });
+  addEventListener('keyup', (e) => {
+    const a = KEYMAP[e.code];
+    if (a) { e.preventDefault(); Input.press(a, false); }
+  });
+
+  const bind = (id, action) => {
+    const el = document.getElementById(id);
+    const down = (e) => { e.preventDefault(); firstGesture(); el.classList.add('pressed'); Input.press(action, true); };
+    const up   = (e) => { e.preventDefault(); el.classList.remove('pressed'); Input.press(action, false); };
+    el.addEventListener('pointerdown', down);
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+    el.addEventListener('pointerleave', up);
+    el.addEventListener('contextmenu', (e) => e.preventDefault());
+  };
+  bind('btn-left', 'left'); bind('btn-right', 'right'); bind('btn-jump', 'jump');
+
+  // Any tap on the start overlay begins the game (and unlocks audio).
+  document.getElementById('start').addEventListener('pointerdown', (e) => { e.preventDefault(); firstGesture(); });
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  AUDIO — persistent WebAudio context (ported+extended from the
+//  Tic-Tac-Toe engine). Music layer arrives in P6; here: unlock + SFX.
+// ══════════════════════════════════════════════════════════════════
+const Audio = {
+  ctx: null, master: null, muted: false, unlocked: false,
+  ensure() {
+    if (!this.ctx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      this.ctx = new AC();
+      this.master = this.ctx.createGain();
+      this.master.gain.value = this.muted ? 0 : 0.5;
+      this.master.connect(this.ctx.destination);
+    }
+    if (this.ctx.state === 'suspended') this.ctx.resume();
+    this.unlocked = this.ctx.state === 'running';
+  },
+  noteToFreq(name) {
+    const S = { C:0, D:2, E:4, F:5, G:7, A:9, B:11 };
+    const m = String(name).match(/^([A-G])(#|b)?(\d)$/); if (!m) return 0;
+    const semi = S[m[1]] + (m[2] === '#' ? 1 : m[2] === 'b' ? -1 : 0);
+    return 440 * 2 ** ((+m[3] * 12 + semi - 57) / 12);
+  },
+  blip(freq, dur, wave, gain, when) {
+    if (!this.ctx || this.muted || !freq) return;
+    const t = when != null ? when : this.ctx.currentTime;
+    const osc = this.ctx.createOscillator(), g = this.ctx.createGain();
+    osc.type = wave || 'square'; osc.frequency.value = freq;
+    osc.connect(g); g.connect(this.master);
+    g.gain.setValueAtTime((gain || 0.5), t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur * 0.9);
+    osc.start(t); osc.stop(t + dur + 0.03);
+  },
+  sfx(name) {
+    this.ensure(); if (!this.ctx) return;
+    const n = this.noteToFreq.bind(this), t0 = this.ctx.currentTime;
+    switch (name) {
+      case 'start': this.blip(n('C5'), .09, 'square', .4, t0); this.blip(n('G5'), .12, 'square', .4, t0 + .1); break;
+      case 'jump':  this.blip(n('E5'), .09, 'square', .35, t0); this.blip(n('B5'), .07, 'square', .3, t0 + .05); break;
+      default:      this.blip(n('A4'), .06, 'square', .3, t0);
+    }
+  },
+  toggleMute() { this.muted = !this.muted; if (this.master) this.master.gain.value = this.muted ? 0 : 0.5; },
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  FLOW — scene transitions
+// ══════════════════════════════════════════════════════════════════
+let _started = false;
+function firstGesture() {           // called on the first tap/keypress
+  Audio.ensure();
+  if (!_started) { _started = true; startGame(); }
+}
+function startGame() {
+  reseed(pickSeed());
+  Game.scene = 'PLAY'; Game.t = 0; Game.level = 1; Game.lives = CONFIG.LIVES_START;
+  Game.paused = false;
+  Object.assign(Game.hero, { x: 240, y: CONFIG.PLAT_Y, vx: 0, vy: 0, onGround: true, face: 1 });
+  document.getElementById('start').classList.add('hidden');
+  Audio.sfx('start');
+}
+function togglePause() {
+  if (Game.scene !== 'PLAY') return;
+  Game.paused = !Game.paused;
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  UPDATE — fixed-timestep simulation (dt is constant = CONFIG.DT)
+//  Placeholder hero kinematics; replaced by real physics in P3.
+// ══════════════════════════════════════════════════════════════════
+function update(dt) {
+  Game.t += dt;
+  if (Game.scene !== 'PLAY') return;
+  const h = Game.hero, C = CONFIG;
+
+  h.vx = (Input.right ? 1 : 0) * C.MOVE_SPEED - (Input.left ? 1 : 0) * C.MOVE_SPEED;
+  if (h.vx > 0) h.face = 1; else if (h.vx < 0) h.face = -1;
+
+  if (Input.consumeJump() && h.onGround) { h.vy = -C.JUMP_V; h.onGround = false; Audio.sfx('jump'); }
+  h.vy += C.GRAVITY * dt;
+
+  h.x += h.vx * dt;
+  h.y += h.vy * dt;
+
+  // Placeholder floor at platform level; clamp to platform span.
+  if (h.y >= C.PLAT_Y) { h.y = C.PLAT_Y; h.vy = 0; h.onGround = true; }
+  if (h.x < C.PLAT_X0 + 8) h.x = C.PLAT_X0 + 8;
+  if (h.x > C.PLAT_X1 - 8) h.x = C.PLAT_X1 - 8;
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  RENDER
+// ══════════════════════════════════════════════════════════════════
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+
+function render() {
+  const C = CONFIG;
+  // Sky
+  const g = ctx.createLinearGradient(0, 0, 0, C.H);
+  g.addColorStop(0, '#241a2e'); g.addColorStop(1, '#3a1f2b');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, C.W, C.H);
+
+  // Lava flanks (static placeholder; animated bubbling in P2)
+  ctx.fillStyle = '#c1121f';
+  ctx.fillRect(0, C.LAVA_Y, C.PLAT_X0, C.H - C.LAVA_Y);
+  ctx.fillRect(C.PLAT_X1, C.LAVA_Y, C.W - C.PLAT_X1, C.H - C.LAVA_Y);
+  ctx.fillStyle = '#f4a300';
+  for (let x = 4; x < C.PLAT_X0; x += 14) ctx.fillRect(x, C.LAVA_Y + 2, 6, 3);
+  for (let x = C.PLAT_X1 + 4; x < C.W; x += 14) ctx.fillRect(x, C.LAVA_Y + 2, 6, 3);
+
+  // Tower + platform
+  ctx.fillStyle = '#2b2f38';
+  ctx.fillRect(C.PLAT_X0, C.PLAT_Y + 2, C.PLAT_X1 - C.PLAT_X0, C.H - C.PLAT_Y);
+  ctx.fillStyle = '#3d4450';
+  ctx.fillRect(C.PLAT_X0, C.PLAT_Y - 4, C.PLAT_X1 - C.PLAT_X0, 6);
+  ctx.fillStyle = '#525b6b';
+  ctx.fillRect(C.PLAT_X0, C.PLAT_Y - 4, C.PLAT_X1 - C.PLAT_X0, 2);
+
+  // Spawner cube (placeholder; animated in P4)
+  ctx.fillStyle = '#111';
+  ctx.fillRect(C.SPAWN_X - 12, C.SPAWN_Y - 12, 24, 24);
+  ctx.fillStyle = '#39a0ed';
+  ctx.fillRect(C.SPAWN_X - 4, C.SPAWN_Y - 4, 8, 8);
+
+  // Hero placeholder (real sprite in P3)
+  if (Game.scene === 'PLAY') {
+    const h = Game.hero;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(Math.round(h.x - h.w / 2), Math.round(h.y - h.h), h.w, h.h);
+    ctx.fillStyle = PALETTE[h.colorIdx].css || '#39a0ed';
+    ctx.fillRect(Math.round(h.x - h.w / 2) + 3, Math.round(h.y - h.h) + 3, h.w - 6, h.h - 6);
+  }
+
+  // HUD (minimal placeholder; full HUD in P6)
+  ctx.fillStyle = '#eee8d5';
+  ctx.font = '10px monospace';
+  ctx.textBaseline = 'top';
+  ctx.fillText('LV ' + Game.level + '   ♥×' + Game.lives, 6, 6);
+  if (Game.scene === 'PLAY') {
+    const remain = Math.max(0, Math.ceil(CONFIG.LEVEL_TIME - Game.t));
+    const txt = Game.paused ? 'PAUSED' : (remain + 's');
+    ctx.textAlign = 'center'; ctx.fillText(txt, C.W / 2, 6); ctx.textAlign = 'left';
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  LOOP — fixed timestep with accumulator; render every frame
+// ══════════════════════════════════════════════════════════════════
+let acc = 0, last = null, _fpsT = 0, _fpsN = 0;
+function tick(now) {
+  if (last === null) last = now;
+  let el = (now - last) / 1000; last = now;
+  if (el > 0.25) el = 0.25;                 // clamp huge gaps (tab was hidden)
+  if (Game.scene === 'PLAY' && !Game.paused) {
+    acc += el;
+    let guard = 0;
+    while (acc >= CONFIG.DT && guard++ < 600) { update(CONFIG.DT); acc -= CONFIG.DT; }
+  } else {
+    update(0);                              // keep title timers ticking lightly
+  }
+  _fpsN++; _fpsT += el; if (_fpsT >= 0.5) { Game.fps = Math.round(_fpsN / _fpsT); _fpsN = 0; _fpsT = 0; }
+  render();
+  requestAnimationFrame(tick);
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  RESIZE / LIFECYCLE
+// ══════════════════════════════════════════════════════════════════
+function resize() {
+  const vw = innerWidth, vh = innerHeight;
+  const scale = Math.min(vw / CONFIG.W, vh / CONFIG.H);
+  canvas.style.width = Math.floor(CONFIG.W * scale) + 'px';
+  canvas.style.height = Math.floor(CONFIG.H * scale) + 'px';
+  const portrait = vh > vw;
+  document.getElementById('rotate').classList.toggle('show', portrait);
+}
+addEventListener('resize', resize);
+addEventListener('orientationchange', resize);
+document.addEventListener('visibilitychange', () => { if (document.hidden && Game.scene === 'PLAY') Game.paused = true; });
+addEventListener('blur', () => { if (Game.scene === 'PLAY') Game.paused = true; });
+
+// ══════════════════════════════════════════════════════════════════
+//  BOOT
+// ══════════════════════════════════════════════════════════════════
+reseed(pickSeed());
+initInput();
+resize();
+requestAnimationFrame(tick);
+
+// ── Test hook: pure logic + deterministic stepping for Playwright ──
+window.BS = {
+  version: '0.1.0-P1',
+  CONFIG, PALETTE,
+  mulberry32,
+  state: () => Game,
+  scene: () => Game.scene,
+  seed: () => Game.seed,
+  reseed,
+  Input,
+  audioState: () => (Audio.ctx ? Audio.ctx.state : 'none'),
+  start: startGame,
+  pause: togglePause,
+  isPaused: () => Game.paused,
+  // Deterministic simulation stepping (bypasses rAF timing) for physics tests.
+  step: (dt) => update(dt),
+  stepFixed: (n) => { for (let i = 0; i < (n | 0); i++) update(CONFIG.DT); },
+};
+
+})();
+</script>
+</body>
+</html>
