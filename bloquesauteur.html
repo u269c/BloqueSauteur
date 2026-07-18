@@ -50,7 +50,7 @@
   #rotate { position:fixed; top:0; left:0; right:0; z-index:15; pointer-events:none;
     text-align:center; font-size:min(3.4vmin,15px); color:#f4d03f; padding:6px;
     background:rgba(6,8,18,0.6); display:none; }
-  @media (orientation:portrait) { #rotate.show { display:block; } }
+  @media (orientation:portrait) { #rotate.show { display:block; } .overlay h1 { font-size:min(8.5vw,60px); } }
 
   /* Top-right HUD buttons */
   #topbar { position:fixed; top:2vmin; right:2vmin; z-index:12; display:flex; gap:1.4vmin; }
@@ -799,10 +799,11 @@ function updateBoss(dt) {
   const phase2 = b.hits >= 2;
   const spd = (BOSS.charge[b.type] || 60) * (phase2 ? 1.28 : 1);
 
-  // gravity + surface follow
+  // gravity + floor. The boss floats at the base platform line (ignores holes)
+  // so it can never fall into the lava and strand the fight in an unwinnable state.
+  const floorY = ter.baseTop;
   b.vy += ENEMY.gravity * dt; b.y += b.vy * dt;
-  const surf = surfaceAt(ter, b.x);
-  if (surf != null && b.y >= surf) { b.y = surf; b.vy = 0; b.onGround = true; } else b.onGround = false;
+  if (b.y >= floorY) { b.y = floorY; b.vy = 0; b.onGround = true; } else b.onGround = false;
 
   const ease = (to, rate) => { const d = to - b.x; b.x += Math.sign(d) * Math.min(Math.abs(d), rate * dt); return Math.abs(d) < 1; };
 

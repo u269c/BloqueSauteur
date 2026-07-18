@@ -101,6 +101,24 @@ test.describe('P5 · attack patterns', () => {
     expect(r.travelled).toBeGreaterThan(80);    // actually sweeps across the platform
   });
 
+  test('boss never falls into a hole/lava on a hole-heavy level (regression)', async ({ page }) => {
+    const r = await page.evaluate(() => {
+      window.BS.start(); window.BS.reseed(31337); window.BS.setLevel(4);
+      const st = window.BS.state(); st.hero.ghost = 1e9;
+      window.BS.activateBoss();
+      const C = window.BS.CONFIG, base = window.BS.terrain().baseTop;
+      let maxY = -1, everAlive = true;
+      for (let i = 0; i < 20 * 120; i++) {                 // 20 s of charging/returning
+        window.BS.stepFixed(1);
+        const b = window.BS.boss(); if (!b) break;
+        maxY = Math.max(maxY, b.y);
+      }
+      return { maxY, base, lava: C.LAVA_Y };
+    });
+    expect(r.maxY).toBeLessThanOrEqual(r.base + 0.5);   // never dropped below the platform line
+    expect(r.maxY).toBeLessThan(r.lava);                // and certainly never into the lava
+  });
+
   test('L4 rainbow boss uses a telegraph wind-up (feint capability)', async ({ page }) => {
     const r = await page.evaluate(() => {
       window.BS.start(); window.BS.reseed(3); window.BS.setLevel(4);
