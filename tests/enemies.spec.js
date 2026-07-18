@@ -121,6 +121,37 @@ test.describe('P4 · movement & despawn', () => {
     expect(r.despawned).toBe(true);      // fell off the left edge into the lava
   });
 
+  test('L2+ enemies leap interior holes; on L1 they fall in (neg. control)', async ({ page }) => {
+    const run = async (level) => page.evaluate((level) => {
+      window.BS.start(); window.BS.reseed(1); window.BS.setLevel(level);
+      const C = window.BS.CONFIG, T = C.TILE, t = window.BS.terrain();
+      for (let i = 0; i < t.nCols; i++) t.cols[i] = C.PLAT_Y;
+      for (let i = 8; i < 11; i++) t.cols[i] = null;              // interior hole, cols 8-10 (48px)
+      t.segments = []; let i = 0; while (i < t.nCols) { if (t.cols[i] == null) { i++; continue; } let j = i; while (j < t.nCols && t.cols[j] === t.cols[i]) j++; t.segments.push({ x0: t.x0 + i * T, x1: t.x0 + j * T, top: t.cols[i] }); i = j; }
+      const st = window.BS.state(); st.hero.ghost = 1e9; st.bossActive = true; st.enemies.length = 0;
+      window.BS.spawnEnemy('clear', 'right');
+      const e = window.BS.enemies()[0];
+      Object.assign(e, { x: t.x0 + 12 * T, y: C.PLAT_Y, vx: -e.baseSpeed, vy: 0, dir: -1, onGround: true, leaping: false });
+      const holeLeftX = t.x0 + 8 * T;
+      let reachedFarSide = false, fellIn = false;
+      for (let k = 0; k < 300; k++) {
+        window.BS.stepFixed(1);
+        const cur = window.BS.enemies()[0];
+        if (!cur) break;
+        if (cur.x <= holeLeftX && cur.y <= C.PLAT_Y + 2) reachedFarSide = true;   // crossed, still on the deck
+        if (cur.y >= C.LAVA_Y - 1) fellIn = true;
+      }
+      return { reachedFarSide, fellIn };
+    }, level);
+
+    const l2 = await run(2);
+    expect(l2.reachedFarSide).toBe(true);    // leapt the hole and kept marching
+    expect(l2.fellIn).toBe(false);
+    const l1 = await run(1);
+    expect(l1.reachedFarSide).toBe(false);   // negative control: L1 has no leaping → falls in
+    expect(l1.fellIn).toBe(true);
+  });
+
   test('red enemies move faster than clear ones', async ({ page }) => {
     const r = await page.evaluate(() => {
       const speedOf = (type) => {
