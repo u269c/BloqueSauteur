@@ -221,6 +221,32 @@ const MODES = {
 
 const LEVEL_NAMES = { 1: 'THE SHALLOWS', 2: 'BROKEN GROUND', 3: 'THE GAPS', 4: 'INFERNO' };
 
+// ── Aesthetic themes (purely visual; gameplay stays levels 1–4) ──
+// Each run randomly (seeded) assigns a sky + a world to each level.
+const SKY_KEYS = ['sunset', 'sunrise', 'blueClouds', 'thunder', 'space', 'windy'];
+const SKY_NAMES = { sunset: 'SUNSET', sunrise: 'SUNRISE', blueClouds: 'CLEAR SKIES', thunder: 'THUNDERSTORM', space: 'DEEP SPACE', windy: 'GLOOM' };
+// hazard: what fills the holes/flanks below (all cosmetic — a fall always costs a heart).
+const WORLDS = {
+  classic:   { name: 'THE TOWER',        hazard: 'lava',   deco: { body: '#2b2f38', edge: '#5b6472', hi: '#7a8494', brick: '#242830' } },
+  rooftops:  { name: 'ROOFTOPS',         hazard: 'void',   deco: { body: '#4a4e57', edge: '#6d727d', hi: '#8b909b', brick: '#3a3e46' } },
+  poison:    { name: 'POISON MARSH',     hazard: 'poison', deco: { body: '#2e3a2a', edge: '#4e6b3a', hi: '#7cb342', brick: '#26301f' } },
+  climbing:  { name: 'THE CLIMB',        hazard: 'void',   deco: { body: '#5a3f28', edge: '#8a5a30', hi: '#b5843f', brick: '#472f1d' } },
+  wineCorks: { name: 'THE VINEYARD',     hazard: 'wine',   deco: { body: '#c8a06a', edge: '#e0c090', hi: '#f0dcb0', brick: '#a8804a' } },
+  ropeBridge:{ name: 'CROC RIVER',       hazard: 'river',  deco: { body: '#6b4a2a', edge: '#8a5a30', hi: '#a87a44', brick: '#523620' } },
+  skyClouds: { name: 'CLOUDTOP',         hazard: 'sky',    deco: { body: '#e8eef5', edge: '#ffffff', hi: '#ffffff', brick: '#d2dceb' } },
+  mansion:   { name: 'THE MANSION',      hazard: 'dark',   deco: { body: '#5a3b2a', edge: '#7a5236', hi: '#9a6a44', brick: '#412a1e' } },
+  bathtub:   { name: 'THE BATHTUB',      hazard: 'water',  deco: { body: '#e6d8c0', edge: '#fff4e2', hi: '#ffffff', brick: '#d0c0a4' } },
+  beach:     { name: 'THE BEACH',        hazard: 'sea',    deco: { body: '#e0c890', edge: '#f0dcae', hi: '#fff0cc', brick: '#c8a868' } },
+};
+const WORLD_KEYS = Object.keys(WORLDS);
+
+// Deterministic Fisher–Yates shuffle using a seeded PRNG.
+function shuffled(arr, rng) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); const t = a[i]; a[i] = a[j]; a[j] = t; }
+  return a;
+}
+
 // Chiptune loops + jingles (TRACKS format from the reference engine: [note, beats]).
 const MUSIC = {
   title:   { bpm: 120, wave: 'square', gain: 0.22, loop: true, notes: [['E5',1],['B4',.5],['C5',.5],['D5',1],['C5',.5],['B4',.5],['A4',1],['A4',.5],['C5',.5],['E5',1],['D5',.5],['C5',.5],['B4',1.5],['R',.5]] },
@@ -334,6 +360,8 @@ const Game = {
   mode: 'normal',        // easy | normal | rage
   hp: CONFIG.LIVES_START, // health in hearts (fractional)
   terrain: null,
+  theme: { world: 'classic', sky: 'sunset' },   // assigned per level from the seed
+  themeOrder: null,
   enemies: [],
   boss: null,
   spawnT: 0,                     // countdown to next spawn
@@ -380,9 +408,22 @@ const Save = {
   },
 };
 
-function reseed(seed) { Game.seed = seed >>> 0; Game.rand = mulberry32(Game.seed); buildLevel(); }
+function reseed(seed) {
+  Game.seed = seed >>> 0; Game.rand = mulberry32(Game.seed);
+  // Per-run theme assignment: distinct worlds + skies across the 4 levels.
+  const trng = mulberry32(Game.seed ^ 0x5bd1e995);
+  Game.themeOrder = { worlds: shuffled(WORLD_KEYS, trng), skies: shuffled(SKY_KEYS, trng) };
+  buildLevel();
+}
 function buildLevel() {
   Game.terrain = genTerrain(Game.level, Game.seed);
+  // Assign this level's look (debug override: ?theme=world,sky).
+  const o = Game.themeOrder || { worlds: WORLD_KEYS, skies: SKY_KEYS };
+  const i = (Game.level - 1);
+  let world = o.worlds[i % o.worlds.length], sky = o.skies[i % o.skies.length];
+  const q = new URLSearchParams(location.search).get('theme');
+  if (q) { const [w, s] = q.split(','); if (WORLDS[w]) world = w; if (SKY_KEYS.includes(s)) sky = s; }
+  Game.theme = { world, sky };
   Game.hitThisLevel = false;
   Game.enemies = [];
   Game.boss = null;
@@ -994,43 +1035,114 @@ const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 ctx.imageSmoothingEnabled = false;
 
-// Per-level terrain decoration palette.
-const DECO = {
-  1: { body: '#2b2f38', edge: '#5b6472', hi: '#7a8494', brick: '#242830' },
-  2: { body: '#3a3324', edge: '#6b5b3a', hi: '#8a7a4a', brick: '#2e2820' },
-  3: { body: '#243a4a', edge: '#3a7ba0', hi: '#5aa6d0', brick: '#1e3240' },
-  4: { body: '#33243a', edge: '#7a3a6b', hi: '#a04a8a', brick: '#2a1e30' },
-};
+function vgrad(y0, y1, c0, c1) { const g = ctx.createLinearGradient(0, y0, 0, y1); g.addColorStop(0, c0); g.addColorStop(1, c1); ctx.fillStyle = g; ctx.fillRect(-8, y0, CONFIG.W + 16, y1 - y0); }
+function hash(n) { n = (n << 13) ^ n; return ((n * (n * n * 15731 + 789221) + 1376312589) & 0x7fffffff) / 0x7fffffff; }
 
-function drawLava() {
-  const C = CONFIG, t = Game.t, y0 = C.LAVA_Y;
-  ctx.fillStyle = '#7a0d13';
-  ctx.fillRect(0, y0, C.W, C.H - y0);
-  // wobbling molten surface band
-  for (let x = 0; x < C.W; x += 4) {
-    const wob = Math.sin(x * 0.05 + t * 2.6) * 2 + Math.sin(x * 0.11 - t * 3.7) * 1.4;
-    ctx.fillStyle = (((x >> 2) + (t * 5 | 0)) & 1) ? '#ff7a00' : '#f4a300';
-    ctx.fillRect(x, y0 + wob - 1, 4, 5);
+// ── Skies (drawn behind everything; animated via Game.t) ──
+function drawSky(sky) {
+  const C = CONFIG, W = C.W, H = C.H, t = Game.t;
+  switch (sky) {
+    case 'sunset': {
+      vgrad(0, H, '#3a1b4e', '#f4772e');
+      const sx = W * 0.72, sy = H * 0.6;
+      ctx.fillStyle = '#ffd36b'; ctx.beginPath(); ctx.arc(sx, sy, 26, 0, 7); ctx.fill();
+      ctx.fillStyle = 'rgba(255,150,60,0.25)'; ctx.beginPath(); ctx.arc(sx, sy, 40, 0, 7); ctx.fill();
+      ctx.fillStyle = 'rgba(60,20,50,0.35)'; for (let i = 0; i < 3; i++) ctx.fillRect(0, H * 0.5 + i * 8 + Math.sin(t * 0.3 + i) * 2, W, 3);
+      break;
+    }
+    case 'sunrise': {
+      vgrad(0, H, '#8ec5e8', '#ffd9c0');
+      const sx = W * 0.3, sy = H * 0.55;
+      ctx.fillStyle = '#fff0c0'; ctx.beginPath(); ctx.arc(sx, sy, 22, 0, 7); ctx.fill();
+      ctx.fillStyle = 'rgba(255,220,150,0.3)'; ctx.beginPath(); ctx.arc(sx, sy, 38, 0, 7); ctx.fill();
+      drawClouds('#ffffff', 0.7, t);
+      break;
+    }
+    case 'blueClouds': { vgrad(0, H, '#3a86d0', '#bfe3f5'); drawClouds('#ffffff', 1, t); break; }
+    case 'thunder': {
+      const flash = (t % 4.3) < 0.12 || (t % 4.3 > 0.2 && t % 4.3 < 0.28);
+      vgrad(0, H, flash ? '#b9c4d4' : '#20242e', flash ? '#8894a6' : '#3a4150');
+      drawClouds('#4a4f5c', 1, t * 1.6);
+      if ((t % 4.3) < 0.28) { // jagged bolt
+        ctx.strokeStyle = '#fdf6b0'; ctx.lineWidth = 2; ctx.beginPath();
+        let bx = W * (0.3 + 0.4 * hash(Math.floor(t / 4.3))), by = 20; ctx.moveTo(bx, by);
+        for (let s = 0; s < 6; s++) { bx += (hash(s + Math.floor(t / 4.3) * 7) - 0.5) * 26; by += 18; ctx.lineTo(bx, by); }
+        ctx.stroke();
+      }
+      break;
+    }
+    case 'space': {
+      ctx.fillStyle = '#05060f'; ctx.fillRect(-8, -8, W + 16, H + 16);
+      for (let i = 0; i < 70; i++) { const x = hash(i) * W, y = hash(i + 99) * H * 0.9; const tw = 0.6 + 0.4 * Math.sin(t * 2 + i); ctx.fillStyle = `rgba(255,255,255,${tw})`; ctx.fillRect(x, y, 1, 1); }
+      drawGalaxy(W * 0.2, H * 0.28, t); drawGalaxy(W * 0.8, H * 0.62, t * 0.7);
+      // shooting star
+      const sp = (t % 3.5) / 3.5; if (sp < 0.25) { const sx = W * (0.1 + sp * 3), sy = H * (0.15 + sp * 1.2); ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx - 14, sy - 6); ctx.stroke(); }
+      drawJWST((t * 8) % (W + 60) - 30, H * 0.35 + Math.sin(t * 0.5) * 10, t);
+      break;
+    }
+    case 'windy': {
+      vgrad(0, H, '#8b95a0', '#c3ccd4');
+      ctx.fillStyle = '#6f7a86'; // distant hills
+      for (let hx = -20; hx < W + 20; hx += 60) { const hh = 30 + 14 * Math.sin(hx * 0.05); ctx.beginPath(); ctx.arc(hx, C.PLAT_Y + 10, hh, Math.PI, 0); ctx.fill(); }
+      for (let i = 0; i < 4; i++) { const fy = 60 + i * 34, fx = ((t * (14 + i * 6)) % (W + 160)) - 80; ctx.fillStyle = `rgba(230,235,240,${0.14 + i * 0.03})`; ctx.beginPath(); ctx.ellipse(fx, fy, 90, 16, 0, 0, 7); ctx.fill(); }
+      break;
+    }
+    default: vgrad(0, H, '#241a2e', '#3a1f2b');
   }
-  ctx.fillStyle = '#ffd25a';
-  for (let x = 0; x < C.W; x += 4) {
-    const wob = Math.sin(x * 0.05 + t * 2.6) * 2;
-    if (((x * 7 + (t * 8 | 0)) % 23) === 0) ctx.fillRect(x, y0 + wob - 2, 3, 2);
+}
+function drawClouds(col, alpha, t) {
+  const C = CONFIG;
+  ctx.fillStyle = col; ctx.globalAlpha = 0.85 * alpha;
+  for (let i = 0; i < 5; i++) {
+    const cx = ((t * (8 + i * 3) + i * 130) % (C.W + 120)) - 60, cy = 24 + i * 26;
+    ctx.beginPath(); ctx.ellipse(cx, cy, 26, 10, 0, 0, 7); ctx.ellipse(cx + 18, cy + 4, 18, 8, 0, 0, 7); ctx.ellipse(cx - 18, cy + 4, 16, 7, 0, 0, 7); ctx.fill();
   }
-  // rising bubbles
-  ctx.fillStyle = '#ffb01e';
-  for (let i = 0; i < 16; i++) {
-    const bx = (i * 89 + 13) % C.W;
-    const phase = (t * 0.6 + i * 0.41) % 1;
-    const by = y0 + 20 - phase * 18;
-    if (phase > 0.12 && phase < 0.95) { const r = 1 + (i % 3 === 0 ? 1 : 0); ctx.fillRect(bx, by, r + 1, r + 1); }
+  ctx.globalAlpha = 1;
+}
+function drawGalaxy(cx, cy, t) {
+  ctx.save(); ctx.translate(cx, cy); ctx.rotate(t * 0.1);
+  for (let i = 0; i < 40; i++) { const a = i * 0.5, r = i * 0.6; ctx.fillStyle = `rgba(${180 + i},${140},${230 - i},${0.5 - i * 0.01})`; ctx.fillRect(Math.cos(a) * r, Math.sin(a) * r * 0.6, 2, 2); ctx.fillRect(-Math.cos(a) * r, -Math.sin(a) * r * 0.6, 2, 2); }
+  ctx.fillStyle = 'rgba(255,240,255,0.9)'; ctx.fillRect(-1, -1, 3, 3); ctx.restore();
+}
+function drawJWST(x, y, t) {
+  // gold hex mirror + angled sunshield
+  ctx.save(); ctx.translate(x, y);
+  ctx.fillStyle = '#5a2a6a'; ctx.beginPath(); ctx.moveTo(-14, 8); ctx.lineTo(14, 4); ctx.lineTo(10, 12); ctx.lineTo(-12, 16); ctx.closePath(); ctx.fill();  // sunshield
+  ctx.fillStyle = '#f4c430'; for (let i = 0; i < 6; i++) { const a = (i / 6) * 6.283; ctx.fillRect(Math.cos(a) * 4 - 1, Math.sin(a) * 4 - 6, 3, 3); } ctx.fillRect(-1, -3, 3, 3);
+  ctx.restore();
+}
+
+// ── Hazards (fill below CONFIG.LAVA_Y + show through holes; all cosmetic) ──
+function drawHazard(worldKey) {
+  const C = CONFIG, t = Game.t, y0 = C.LAVA_Y, w = WORLDS[worldKey] || WORLDS.classic;
+  const liquid = (base, hi, hot) => {
+    ctx.fillStyle = base; ctx.fillRect(-8, y0, C.W + 16, C.H - y0 + 8);
+    for (let x = 0; x < C.W; x += 4) { const wob = Math.sin(x * 0.05 + t * 2.6) * 2 + Math.sin(x * 0.11 - t * 3.7) * 1.4; ctx.fillStyle = (((x >> 2) + (t * 5 | 0)) & 1) ? hi : hot; ctx.fillRect(x, y0 + wob - 1, 4, 5); }
+    ctx.fillStyle = 'rgba(255,255,255,0.5)'; for (let i = 0; i < 14; i++) { const bx = (i * 89 + 13) % C.W, ph = (t * 0.6 + i * 0.41) % 1; if (ph > 0.12 && ph < 0.95) ctx.fillRect(bx, y0 + 20 - ph * 18, 2, 2); }
+  };
+  switch (w.hazard) {
+    case 'lava': liquid('#7a0d13', '#ff7a00', '#f4a300'); break;
+    case 'poison': liquid('#2a0f3a', '#a840e0', '#7a20b0'); break;
+    case 'wine': liquid('#3a0a1e', '#7a1030', '#a01840'); break;
+    case 'water': liquid('#2a6fb0', '#7ec8f0', '#a8e0ff'); break;
+    case 'sea': liquid('#1f6ea8', '#4aa8e0', '#8fd4f5'); break;
+    case 'river': { // crocodile river
+      liquid('#245a7a', '#3f88a8', '#6fb0c8');
+      ctx.fillStyle = '#2e5a2e';
+      for (let i = 0; i < 3; i++) { const cx = ((t * 12 + i * 170) % (C.W + 80)) - 40, cy = y0 + 12 + i * 6; ctx.fillRect(cx, cy, 22, 4); ctx.fillRect(cx + 22, cy - 1, 6, 4); ctx.fillStyle = '#e8e8e8'; ctx.fillRect(cx + 24, cy, 1, 1); ctx.fillStyle = '#2e5a2e'; for (let s = 0; s < 4; s++) ctx.fillRect(cx + 3 + s * 5, cy - 2, 2, 2); }
+      break;
+    }
+    case 'void': vgrad(y0 - 10, C.H, 'rgba(10,10,18,0)', '#0a0a12'); break;      // abyss fade
+    case 'dark': vgrad(y0 - 10, C.H, 'rgba(8,6,10,0.2)', '#050307'); break;      // mansion basement
+    case 'sky': /* open air — leave the sky showing */ break;
+    default: liquid('#7a0d13', '#ff7a00', '#f4a300');
   }
 }
 
 function drawTerrain() {
   const C = CONFIG, ter = Game.terrain;
   if (!ter) return;
-  const segs = ter.segments, d = DECO[ter.level] || DECO[1];
+  const segs = ter.segments, d = (WORLDS[Game.theme.world] || WORLDS.classic).deco;
   // Holes are left open — the sky/horizon and the hazard band (drawn earlier in
   // render()) show straight through the gap.
   // Solid columns per segment.
@@ -1247,12 +1359,9 @@ function render() {
     ctx.translate((Math.random() * 2 - 1) * m, (Math.random() * 2 - 1) * m);
   }
 
-  // Sky
-  const g = ctx.createLinearGradient(0, 0, 0, C.H);
-  g.addColorStop(0, '#241a2e'); g.addColorStop(1, '#3a1f2b');
-  ctx.fillStyle = g; ctx.fillRect(-8, -8, C.W + 16, C.H + 16);
-
-  drawLava();
+  // Themed sky + hazard (both full-width, so open holes show them through)
+  drawSky(Game.theme.sky);
+  drawHazard(Game.theme.world);
   drawTerrain();
 
   // Spawner cube(s) — RAGE mode adds a second box on the left.
@@ -1266,7 +1375,7 @@ function render() {
   if (Game.scene === 'PLAY' || Game.scene === 'INTRO' || Game.scene === 'CLEAR') drawHUD();
 
   // Scene overlays (canvas-drawn transient screens)
-  if (Game.scene === 'INTRO') centerText([{ t: 'LEVEL ' + Game.level, big: true, color: '#f4d03f' }, { t: LEVEL_NAMES[Game.level] || '', color: '#eee8d5' }, { t: 'survive 60 seconds, then the boss', color: '#93a1a1' }]);
+  if (Game.scene === 'INTRO') centerText([{ t: 'LEVEL ' + Game.level, big: true, color: '#f4d03f' }, { t: (WORLDS[Game.theme.world] || {}).name + ' · ' + (SKY_NAMES[Game.theme.sky] || ''), color: '#eee8d5' }, { t: 'survive 60 seconds, then the boss', color: '#93a1a1' }]);
   else if (Game.scene === 'CLEAR') centerText([{ t: 'LEVEL CLEAR', big: true, color: '#7cb342' }].concat(Game.gainedLife ? [{ t: '★ no-hit bonus: +1 heart! ★', color: '#f4d03f' }] : [{ t: 'points ' + Game.points, color: '#93a1a1' }]));
   else if (Game.scene === 'GAMEOVER') centerText([{ t: 'GAME OVER', big: true, color: '#e0392f' }, { t: 'reached level ' + Game.level, color: '#eee8d5' }, { t: 'tap to return to title', color: '#93a1a1' }]);
   else if (Game.scene === 'VICTORY') centerText([{ t: 'VICTORY!', big: true, color: '#f4d03f' }, { t: 'you conquered the tower', color: '#eee8d5' }, { t: 'points ' + Game.points + '  ·  ' + MODES[Game.mode].name, color: '#93a1a1' }, { t: 'tap to return to title', color: '#93a1a1' }]);
@@ -1334,7 +1443,9 @@ requestAnimationFrame(tick);
 // ── Test hook: pure logic + deterministic stepping for Playwright ──
 window.BS = {
   version: '0.7.0-modes',
-  CONFIG, PALETTE, LEVELS, LEVEL_NAMES, MUSIC, MODES,
+  CONFIG, PALETTE, LEVELS, LEVEL_NAMES, MUSIC, MODES, WORLDS, WORLD_KEYS, SKY_KEYS,
+  theme: () => Game.theme,
+  themeOrder: () => Game.themeOrder,
   setMode: (m) => { if (MODES[m]) Game.mode = m; },
   mode: () => Game.mode,
   mulberry32,
