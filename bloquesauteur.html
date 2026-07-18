@@ -133,6 +133,16 @@ const PALETTE = [
   { name: 'rainbow', rainbow: true },
 ];
 
+// Per-level difficulty (spawn cadence, enemy roster, pace, boss variant).
+// Numbers are feel-tuning knobs (revisited in P7).
+const LEVELS = {
+  1: { types: ['clear'],                  spawnEvery: 2.2, speed: 26, maxAlive: 4, boss: 'clear'   },
+  2: { types: ['clear', 'red'],           spawnEvery: 2.0, speed: 26, maxAlive: 5, boss: 'red'     },
+  3: { types: ['clear', 'red', 'yellow'], spawnEvery: 2.0, speed: 26, maxAlive: 6, boss: 'yellow'  },
+  4: { types: ['clear', 'red', 'yellow'], spawnEvery: 1.4, speed: 32, maxAlive: 7, boss: 'rainbow' },
+};
+const ENEMY = { r: 7, speedMul: { clear: 1, red: 1.7, yellow: 1 }, bounce: 230, jumpImpulse: 205, gravity: 900 };
+
 // ══════════════════════════════════════════════════════════════════
 //  TERRAIN — seeded, per-level. Deterministic pure function of
 //  (level, seed). Column heightmap → walkable segments; gaps = holes
@@ -232,6 +242,10 @@ const Game = {
   level: 1,
   lives: CONFIG.LIVES_START,
   terrain: null,
+  enemies: [],
+  spawnT: 0,                     // countdown to next spawn
+  bossActive: false,            // regular spawns pause during the boss (P5)
+  kills: 0,
   hitThisLevel: false,           // cleared per level; drives the no-hit +1 life bonus
   hero: {
     x: 240, y: CONFIG.PLAT_Y, vx: 0, vy: 0, w: 12, h: 16, face: 1, colorIdx: 0,
@@ -248,6 +262,9 @@ function reseed(seed) { Game.seed = seed >>> 0; Game.rand = mulberry32(Game.seed
 function buildLevel() {
   Game.terrain = genTerrain(Game.level, Game.seed);
   Game.hitThisLevel = false;
+  Game.enemies = [];
+  Game.bossActive = false;
+  Game.spawnT = (LEVELS[Game.level] || LEVELS[1]).spawnEvery * 0.5;   // first wave comes a touch early
   const sx = findSafeX(Game.terrain);
   Object.assign(Game.hero, {
     x: sx, y: surfaceAt(Game.terrain, sx) ?? CONFIG.PLAT_Y, vx: 0, vy: 0,
@@ -360,6 +377,8 @@ const Audio = {
       case 'hurt':  this.blip(n('A3'), .16, 'sawtooth', .4, t0); this.blip(n('E3'), .18, 'sawtooth', .35, t0 + .04); break;
       case 'die':   this.blip(n('G4'), .12, 'square', .4, t0); this.blip(n('D4'), .12, 'square', .4, t0 + .1); this.blip(n('G3'), .3, 'square', .4, t0 + .2); break;
       case 'land':  this.blip(n('C4'), .04, 'square', .18, t0); break;
+      case 'stomp': this.blip(n('C6'), .05, 'square', .38, t0); this.blip(n('G5'), .07, 'square', .32, t0 + .04); this.blip(n('C5'), .09, 'square', .28, t0 + .09); break;
+      case 'spawn': this.blip(n('E4'), .05, 'triangle', .18, t0); break;
       default:      this.blip(n('A4'), .06, 'square', .3, t0);
     }
   },
@@ -377,7 +396,7 @@ function firstGesture() {           // called on the first tap/keypress
 function startGame() {
   Game.level = 1;
   reseed(pickSeed());                    // reseed → buildLevel() lays terrain + places hero
-  Game.scene = 'PLAY'; Game.t = 0; Game.lives = CONFIG.LIVES_START;
+  Game.scene = 'PLAY'; Game.t = 0; Game.lives = CONFIG.LIVES_START; Game.kills = 0;
   Game.paused = false; Game.hero.face = 1;
   document.getElementById('start').classList.add('hidden');
   Audio.sfx('start');
@@ -457,6 +476,63 @@ function heroHurt(fromRight) {
 
 function onGameOver() { /* full flow in P6 */ }
 
+// ── Enemies + spawner ─────────────────────────────────────────────
+function spawnEnemy(type) {
+  const C = CONFIG, L = LEVELS[Game.level] || LEVELS[1];
+  type = type || L.types[Math.floor(Game.rand() * L.types.length)];
+  const speed = L.speed * (ENEMY.speedMul[type] || 1);
+  Game.enemies.push({
+    x: C.SPAWN_X, y: C.SPAWN_Y + 12, vx: -speed, vy: 0, r: ENEMY.r, type,
+    onGround: false, alive: true, trail: [], trailT: 0,
+    jumpT: 0.5 + Game.rand() * 0.7, spikes: Game.rand() < 0.5 ? 3 : 5, gaze: -1,
+  });
+  Audio.sfx('spawn');
+}
+
+function updateEnemies(dt) {
+  const C = CONFIG, ter = Game.terrain, L = LEVELS[Game.level] || LEVELS[1], h = Game.hero;
+
+  // spawn cadence (paused during boss)
+  if (!Game.bossActive) {
+    Game.spawnT -= dt;
+    if (Game.spawnT <= 0 && Game.enemies.length < L.maxAlive) { spawnEnemy(); Game.spawnT = L.spawnEvery; }
+  }
+
+  for (const e of Game.enemies) {
+    if (!e.alive) continue;
+    // motion-trace samples
+    e.trailT -= dt;
+    if (e.trailT <= 0) { e.trail.push({ x: e.x, y: e.y }); if (e.trail.length > 6) e.trail.shift(); e.trailT = 0.05; }
+
+    // physics: constant leftward vx, gravity, surface follow
+    e.vy += ENEMY.gravity * dt;
+    e.x += e.vx * dt;
+    e.y += e.vy * dt;
+    const surf = surfaceAt(ter, e.x);
+    if (surf != null && e.y >= surf) {
+      e.y = surf; e.vy = 0; e.onGround = true;
+      if (e.type === 'yellow') { e.jumpT -= dt; if (e.jumpT <= 0) { e.vy = -ENEMY.jumpImpulse; e.onGround = false; e.jumpT = 0.9 + Game.rand() * 0.6; } }
+    } else e.onGround = false;
+
+    e.gaze = h.x < e.x ? -1 : 1;                     // eye tracks the hero
+
+    // despawn: dropped off the left edge or fell into a hole → into the lava
+    if (e.y >= C.LAVA_Y || e.x < C.PLAT_X0 - e.r - 2) e.alive = false;
+
+    // hero interaction (skipped entirely while the hero is ghostly)
+    if (e.alive && h.ghost <= 0 && !h.dead) {
+      const el = e.x - e.r, er = e.x + e.r, etop = e.y - 2 * e.r, ebot = e.y;
+      const hl = h.x - h.w / 2, hr = h.x + h.w / 2, htop = h.y - h.h, hbot = h.y;
+      if (hr > el && hl < er && hbot > etop && htop < ebot) {
+        const stomp = h.vy > 0 && h.y < e.y - e.r;   // falling onto its top half
+        if (stomp) { e.alive = false; h.vy = -ENEMY.bounce; h.onGround = false; Game.kills++; Audio.sfx('stomp'); }
+        else heroHurt(e.x > h.x);                     // hit → knock away from the enemy
+      }
+    }
+  }
+  if (Game.enemies.length) Game.enemies = Game.enemies.filter((e) => e.alive);
+}
+
 function update(dt) {
   Game.t += dt;
   if (Game.scene !== 'PLAY' || dt === 0) return;
@@ -495,6 +571,8 @@ function update(dt) {
 
   // lava death — fell into a hole or off an edge and reached the lava surface
   if (h.y >= C.LAVA_Y) heroDie();
+
+  updateEnemies(dt);
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -601,6 +679,41 @@ function drawHero() {
   ctx.globalAlpha = 1;
 }
 
+const ENEMY_COL = { clear: '#dfe6e9', red: '#e0392f', yellow: '#f4d03f', rainbow: '#fff' };
+
+function drawDonut(cx, cy, r, type, spikes, gaze, alpha, phase) {
+  const col = ENEMY_COL[type] || '#fff';
+  ctx.globalAlpha = alpha;
+  // spikes (triangles pointing outward)
+  ctx.fillStyle = type === 'clear' ? 'rgba(220,228,230,0.9)' : col;
+  for (let i = 0; i < spikes; i++) {
+    const a = phase + (i / spikes) * Math.PI * 2;
+    const sx = cx + Math.cos(a) * r, sy = cy + Math.sin(a) * r;
+    const tx = cx + Math.cos(a) * (r + 4), ty = cy + Math.sin(a) * (r + 4);
+    const px = -Math.sin(a) * 2.4, py = Math.cos(a) * 2.4;
+    ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(sx + px, sy + py); ctx.lineTo(sx - px, sy - py); ctx.closePath(); ctx.fill();
+  }
+  // donut ring
+  if (type === 'clear') { ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke(); }
+  else { ctx.fillStyle = col; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill(); }
+  // eye socket + tracking pupil
+  ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(cx, cy, r * 0.55, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(cx + gaze * r * 0.22, cy, r * 0.3, 0, Math.PI * 2); ctx.fill();
+  ctx.globalAlpha = 1;
+}
+
+function drawEnemies() {
+  const phase = Game.t * 6;
+  for (const e of Game.enemies) {
+    // fading motion trail
+    for (let i = 0; i < e.trail.length; i++) {
+      const tp = e.trail[i], a = 0.06 + 0.12 * (i / e.trail.length);
+      drawDonut(tp.x, tp.y - e.r, e.r * 0.85, e.type, e.spikes, e.gaze, a, phase);
+    }
+    drawDonut(e.x, e.y - e.r, e.r, e.type, e.spikes, e.gaze, 1, phase);
+  }
+}
+
 function render() {
   const C = CONFIG;
   // Sky
@@ -614,14 +727,20 @@ function render() {
   // Tower columns + platform tops (holes are left as lava chutes)
   drawTerrain();
 
-  // Spawner cube (placeholder; animated in P4)
-  ctx.fillStyle = '#111';
-  ctx.fillRect(C.SPAWN_X - 12, C.SPAWN_Y - 12, 24, 24);
-  ctx.fillStyle = '#39a0ed';
-  ctx.fillRect(C.SPAWN_X - 4, C.SPAWN_Y - 4, 8, 8);
+  // Spawner cube (floats + wobbles above the platform)
+  const bob = Math.sin(Game.t * 2.2) * 3;
+  const sx = C.SPAWN_X, sy = C.SPAWN_Y + bob;
+  ctx.fillStyle = '#0c0c10'; ctx.fillRect(sx - 13, sy - 13, 26, 26);
+  ctx.fillStyle = '#23252e'; ctx.fillRect(sx - 13, sy - 13, 26, 3);
+  // glowing maw
+  const mawGlow = 0.5 + 0.5 * Math.sin(Game.t * 5);
+  ctx.fillStyle = `rgba(230,57,47,${0.5 + 0.4 * mawGlow})`;
+  ctx.fillRect(sx - 6, sy - 2, 12, 9);
+  ctx.fillStyle = '#0c0c10'; ctx.fillRect(sx - 2, sy - 13, 5, 8);
+  ctx.fillRect(sx - 9, sy + 4, 18, 3);
 
-  // Hero
-  if (Game.scene === 'PLAY') drawHero();
+  // Enemies (behind the hero) + hero
+  if (Game.scene === 'PLAY') { drawEnemies(); drawHero(); }
 
   // HUD (minimal placeholder; full HUD in P6)
   ctx.fillStyle = '#eee8d5';
@@ -698,6 +817,9 @@ window.BS = {
   hero: () => Game.hero,
   heroHurt,           // simulate an enemy/boss hit (P4/P5 call this internally)
   respawnHero,
+  LEVELS,
+  enemies: () => Game.enemies,
+  spawnEnemy,
   Input,
   audioState: () => (Audio.ctx ? Audio.ctx.state : 'none'),
   start: startGame,
