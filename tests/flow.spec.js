@@ -140,6 +140,23 @@ test.describe('P6 · determinism & seed', () => {
     expect(a).toBe(b);
   });
 
+  test('fixed timestep: state depends on step count, not chunking (frame-rate independent)', async ({ page }) => {
+    await openGame(page, { seed: 55 });
+    const r = await page.evaluate(() => {
+      window.BS.freeze(true);
+      const run = (chunks) => {
+        window.BS.start(); window.BS.reseed(55); window.BS.setLevel(1); window.BS.Input.reset();
+        window.BS.Input.press('right', true);
+        for (const c of chunks) window.BS.stepFixed(c);
+        const h = window.BS.hero(); window.BS.Input.reset();
+        return { x: +h.x.toFixed(6), y: +h.y.toFixed(6) };
+      };
+      // same total (240 steps) delivered as 60Hz-like big chunks vs 120Hz-like singles
+      return { coarse: run([4, 4, 4, 228]), fine: run(Array(240).fill(1)) };
+    });
+    expect(r.coarse).toEqual(r.fine);   // identical → wall-clock frame rate cannot change physics
+  });
+
   test('music track switches with scene (title → level → boss)', async ({ page }) => {
     await openGame(page);
     const r = await page.evaluate(() => {
