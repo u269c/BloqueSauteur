@@ -51,12 +51,48 @@
     text-align:center; font-size:min(3.4vmin,15px); color:#f4d03f; padding:6px;
     background:rgba(6,8,18,0.6); display:none; }
   @media (orientation:portrait) { #rotate.show { display:block; } }
+
+  /* Top-right HUD buttons */
+  #topbar { position:fixed; top:2vmin; right:2vmin; z-index:12; display:flex; gap:1.4vmin; }
+  .hud-btn {
+    width:8.5vmin; height:8.5vmin; min-width:38px; min-height:38px;
+    font-size:min(4.4vmin,20px); font-weight:700; color:#eee8d5;
+    background:rgba(10,12,22,0.55); border:2px solid rgba(255,255,255,0.22);
+    border-radius:10px; cursor:pointer;
+  }
+  .hud-btn.off { color:#7a6; opacity:.55; text-decoration:line-through; }
+
+  /* Colour picker */
+  .picker-label { font-size:min(3.4vmin,15px); color:#93a1a1; letter-spacing:.08em; text-transform:uppercase; }
+  .swatches { display:grid; grid-template-columns:repeat(5,1fr); gap:1.6vmin; max-width:min(76vw,360px); }
+  .swatch {
+    width:11vmin; height:11vmin; max-width:56px; max-height:56px; min-width:38px; min-height:38px;
+    border-radius:10px; border:3px solid rgba(255,255,255,0.18); cursor:pointer; position:relative;
+    padding:0; background-clip:padding-box;
+  }
+  .swatch.sel { border-color:#fff; box-shadow:0 0 0 2px #f4d03f; }
+  .swatch.locked { cursor:not-allowed; }
+  .swatch.locked::after { content:'🔒'; position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:min(5vmin,22px); }
+  .swatch.rainbow { background:linear-gradient(120deg,#e0392f,#f4d03f,#7cb342,#39a0ed,#e0348b); }
+
+  .play-btn {
+    margin-top:1vmin; padding:2vmin 6vmin; font-size:min(5vmin,22px); font-weight:700;
+    color:#101018; background:#f4d03f; border:none; border-radius:12px; cursor:pointer;
+    letter-spacing:.05em; box-shadow:0 4px 0 #b58900;
+  }
+  .play-btn:active { transform:translateY(2px); box-shadow:0 2px 0 #b58900; }
+  .play-btn.ghost { background:transparent; color:#b6c2c6; border:2px solid rgba(255,255,255,0.25); box-shadow:none; font-size:min(3.8vmin,17px); padding:1.4vmin 4vmin; }
 </style>
 </head>
 <body>
   <canvas id="game" width="480" height="270"></canvas>
 
   <div id="rotate">↻ Rotate to landscape for the best view</div>
+
+  <div id="topbar">
+    <button class="hud-btn" id="pause-btn" aria-label="Pause">II</button>
+    <button class="hud-btn" id="mute-btn" aria-label="Mute">♪</button>
+  </div>
 
   <div id="controls" aria-hidden="true">
     <div class="btn" id="btn-left">◀</div>
@@ -67,8 +103,18 @@
   <div class="overlay" id="start">
     <h1>BLOQUE&nbsp;SAUTEUR</h1>
     <p>Survive the tower. Stomp the monsters into the lava.</p>
-    <p class="hint">Arrow keys ← → to move, ↑ to jump &nbsp;·&nbsp; or use the on-screen buttons</p>
-    <p class="pulse" style="font-size:min(5vmin,24px);color:#f4d03f">▶ Tap / press any key to start</p>
+    <div class="picker-label">Your colour</div>
+    <div class="swatches" id="swatches"></div>
+    <button class="play-btn" id="play-btn">▶ PLAY</button>
+    <p class="hint">Arrow keys ← → move, ↑ jump &nbsp;·&nbsp; or the on-screen buttons</p>
+  </div>
+
+  <div class="overlay hidden" id="pause">
+    <h1 style="font-size:min(9vmin,52px)">PAUSED</h1>
+    <div class="picker-label">Your colour</div>
+    <div class="swatches" id="swatches-pause"></div>
+    <button class="play-btn" id="resume-btn">▶ RESUME</button>
+    <button class="play-btn ghost" id="quit-btn">✕ QUIT TO TITLE</button>
   </div>
 
 <script>
@@ -146,6 +192,21 @@ const BOSS = {
   r: 17, hits: 3, iframe: 0.9, returnSpeed: 95, jumpImpulse: 250,
   charge:   { clear: 55, red: 108, yellow: 82, rainbow: 122 },   // charge speed per level boss
   idleWait: { clear: 1.2, red: 0.9, yellow: 0.9, rainbow: 0.7 }, // pause between attacks
+};
+
+const LEVEL_NAMES = { 1: 'THE SHALLOWS', 2: 'BROKEN GROUND', 3: 'THE GAPS', 4: 'INFERNO' };
+
+// Chiptune loops + jingles (TRACKS format from the reference engine: [note, beats]).
+const MUSIC = {
+  title:   { bpm: 120, wave: 'square', gain: 0.22, loop: true, notes: [['E5',1],['B4',.5],['C5',.5],['D5',1],['C5',.5],['B4',.5],['A4',1],['A4',.5],['C5',.5],['E5',1],['D5',.5],['C5',.5],['B4',1.5],['R',.5]] },
+  1:       { bpm: 112, wave: 'square', gain: 0.20, loop: true, notes: [['C5',1],['E5',1],['G5',1],['E5',1],['A4',1],['C5',1],['E5',1],['C5',1],['F4',1],['A4',1],['C5',1],['A4',1],['G4',2],['G5',2]] },
+  2:       { bpm: 128, wave: 'square', gain: 0.20, loop: true, notes: [['D5',.5],['A4',.5],['D5',.5],['F5',.5],['E5',.5],['C5',.5],['E5',.5],['G5',.5],['D5',.5],['A4',.5],['D5',.5],['F5',.5],['A5',1],['G5',1]] },
+  3:       { bpm: 140, wave: 'square', gain: 0.20, loop: true, notes: [['E5',.5],['E5',.5],['R',.5],['E5',.5],['R',.5],['C5',.5],['E5',.5],['G5',1],['G4',1],['C5',.75],['G4',.75],['E4',.5],['A4',.5],['B4',.5],['A4',.5],['G4',.5]] },
+  4:       { bpm: 152, wave: 'sawtooth', gain: 0.18, loop: true, notes: [['A4',.5],['C5',.5],['E5',.5],['A5',.5],['G5',.5],['E5',.5],['C5',.5],['E5',.5],['F4',.5],['A4',.5],['C5',.5],['F5',.5],['E5',.5],['B4',.5],['G4',.5],['E4',.5]] },
+  boss:    { bpm: 144, wave: 'sawtooth', gain: 0.20, loop: true, notes: [['D4',.5],['D4',.5],['F4',.5],['D4',.5],['A4',.5],['D4',.5],['G4',.5],['F4',.5],['E4',.5],['E4',.5],['G4',.5],['E4',.5],['C5',1],['A4',1]] },
+  clear:   { bpm: 140, wave: 'square', gain: 0.26, loop: false, notes: [['C5',.5],['E5',.5],['G5',.5],['C6',1],['G5',.5],['C6',1.5]] },
+  victory: { bpm: 132, wave: 'square', gain: 0.28, loop: false, notes: [['C5',.5],['C5',.5],['C5',.5],['C5',1],['G4',.5],['A4',.5],['C5',1],['A4',.5],['C5',2]] },
+  gameover:{ bpm: 100, wave: 'triangle', gain: 0.26, loop: false, notes: [['C5',.5],['G4',.5],['E4',.5],['C4',1.5],['R',.3],['G3',2]] },
 };
 
 // ══════════════════════════════════════════════════════════════════
@@ -252,6 +313,12 @@ const Game = {
   spawnT: 0,                     // countdown to next spawn
   bossActive: false,            // regular spawns pause during the boss
   kills: 0,
+  particles: [],
+  shakeT: 0, shakeMag: 0,
+  sceneT: 0,                     // time in the current transient scene (INTRO/CLEAR/…)
+  gainedLife: false,             // did the last level clear award a no-hit life?
+  rainbowUnlocked: false,        // unlocked on reaching level 4 (persisted)
+  best: 0,                       // best level reached (persisted)
   hitThisLevel: false,           // cleared per level; drives the no-hit +1 life bonus
   hero: {
     x: 240, y: CONFIG.PLAT_Y, vx: 0, vy: 0, w: 12, h: 16, face: 1, colorIdx: 0,
@@ -262,6 +329,28 @@ const Game = {
     dead: false,
   },
   fps: 0,
+};
+
+// ── Persistence (localStorage) ────────────────────────────────────
+const Save = {
+  KEY: 'bloquesauteur.save',
+  load() {
+    let d = {};
+    try { d = JSON.parse(localStorage.getItem(this.KEY) || '{}') || {}; } catch (e) { d = {}; }
+    Game.hero.colorIdx = Number.isInteger(d.colorIdx) ? d.colorIdx : 0;
+    Game.rainbowUnlocked = !!d.rainbowUnlocked;
+    Game.best = d.best | 0;
+    Audio.muted = !!d.muted;
+    // never leave the hero on rainbow if it isn't unlocked yet
+    if (PALETTE[Game.hero.colorIdx] && PALETTE[Game.hero.colorIdx].rainbow && !Game.rainbowUnlocked) Game.hero.colorIdx = 0;
+  },
+  save() {
+    try {
+      localStorage.setItem(this.KEY, JSON.stringify({
+        colorIdx: Game.hero.colorIdx, rainbowUnlocked: Game.rainbowUnlocked, best: Game.best, muted: Audio.muted,
+      }));
+    } catch (e) { /* private mode / quota — ignore */ }
+  },
 };
 
 function reseed(seed) { Game.seed = seed >>> 0; Game.rand = mulberry32(Game.seed); buildLevel(); }
@@ -314,9 +403,13 @@ const KEYMAP = {
 function initInput() {
   addEventListener('keydown', (e) => {
     if (e.repeat) return;
-    firstGesture();
+    onFirstGesture();
     if (e.code === 'KeyP') { togglePause(); return; }
     if (e.code === 'KeyM') { Audio.toggleMute(); return; }
+    if (e.code === 'Enter' && Game.scene === 'TITLE') { startGame(); return; }
+    if (Game.scene === 'INTRO' || Game.scene === 'CLEAR' || Game.scene === 'GAMEOVER' || Game.scene === 'VICTORY') {
+      if (e.code === 'Space' || e.code === 'Enter' || e.code === 'ArrowUp') { e.preventDefault(); tapAdvance(); return; }
+    }
     const a = KEYMAP[e.code];
     if (a) { e.preventDefault(); Input.press(a, true); }
   });
@@ -327,7 +420,7 @@ function initInput() {
 
   const bind = (id, action) => {
     const el = document.getElementById(id);
-    const down = (e) => { e.preventDefault(); firstGesture(); el.classList.add('pressed'); Input.press(action, true); };
+    const down = (e) => { e.preventDefault(); onFirstGesture(); el.classList.add('pressed'); Input.press(action, true); };
     const up   = (e) => { e.preventDefault(); el.classList.remove('pressed'); Input.press(action, false); };
     el.addEventListener('pointerdown', down);
     el.addEventListener('pointerup', up);
@@ -337,8 +430,54 @@ function initInput() {
   };
   bind('btn-left', 'left'); bind('btn-right', 'right'); bind('btn-jump', 'jump');
 
-  // Any tap on the start overlay begins the game (and unlocks audio).
-  document.getElementById('start').addEventListener('pointerdown', (e) => { e.preventDefault(); firstGesture(); });
+  // Title / pause / HUD buttons
+  const on = (id, fn) => document.getElementById(id).addEventListener('click', (e) => { e.preventDefault(); onFirstGesture(); fn(); });
+  on('play-btn', () => startGame());
+  on('resume-btn', () => togglePause(false));
+  on('quit-btn', () => quitToTitle());
+  on('pause-btn', () => { if (Game.scene === 'PLAY') togglePause(); });
+  on('mute-btn', () => Audio.toggleMute());
+
+  // Tap on the canvas advances transient screens (INTRO/CLEAR/GAMEOVER/VICTORY).
+  canvas.addEventListener('pointerdown', (e) => {
+    onFirstGesture();
+    if (Game.scene === 'INTRO' || Game.scene === 'CLEAR' || Game.scene === 'GAMEOVER' || Game.scene === 'VICTORY') { e.preventDefault(); tapAdvance(); }
+  });
+
+  buildSwatches();
+  updateHudButtons();
+}
+
+let _gestured = false;
+function onFirstGesture() {
+  firstGesture();                         // unlock audio
+  if (!_gestured) { _gestured = true; if (Game.scene === 'TITLE') Audio.playMusic('title'); }
+}
+
+function buildSwatches() {
+  for (const containerId of ['swatches', 'swatches-pause']) {
+    const box = document.getElementById(containerId); if (!box) continue;
+    box.innerHTML = '';
+    PALETTE.forEach((p, i) => {
+      const b = document.createElement('button');
+      b.className = 'swatch' + (p.rainbow ? ' rainbow' : '') + (i === Game.hero.colorIdx ? ' sel' : '');
+      if (!p.rainbow) b.style.background = p.css;
+      const locked = p.rainbow && !Game.rainbowUnlocked;
+      if (locked) b.classList.add('locked');
+      b.setAttribute('aria-label', p.name);
+      b.addEventListener('click', (e) => {
+        e.preventDefault(); onFirstGesture();
+        if (p.rainbow && !Game.rainbowUnlocked) return;   // locked until level 4
+        Game.hero.colorIdx = i; Save.save(); buildSwatches();
+      });
+      box.appendChild(b);
+    });
+  }
+}
+
+function updateHudButtons() {
+  const m = document.getElementById('mute-btn');
+  if (m) { m.textContent = Audio.muted ? '♪' : '♪'; m.classList.toggle('off', Audio.muted); }
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -346,18 +485,56 @@ function initInput() {
 //  Tic-Tac-Toe engine). Music layer arrives in P6; here: unlock + SFX.
 // ══════════════════════════════════════════════════════════════════
 const Audio = {
-  ctx: null, master: null, muted: false, unlocked: false,
+  ctx: null, master: null, sfxGain: null, musicGain: null, muted: false, unlocked: false,
+  music: { key: null, playing: false, timer: null },
   ensure() {
     if (!this.ctx) {
       const AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return;
       this.ctx = new AC();
       this.master = this.ctx.createGain();
-      this.master.gain.value = this.muted ? 0 : 0.5;
+      this.sfxGain = this.ctx.createGain(); this.sfxGain.gain.value = 1;
+      this.musicGain = this.ctx.createGain(); this.musicGain.gain.value = 0.7;
+      this.sfxGain.connect(this.master); this.musicGain.connect(this.master);
       this.master.connect(this.ctx.destination);
+      this.applyGain();
     }
     if (this.ctx.state === 'suspended') this.ctx.resume();
     this.unlocked = this.ctx.state === 'running';
+  },
+  applyGain() { if (this.master) this.master.gain.value = (this.muted || Game.paused) ? 0 : 0.55; },
+  // ── music layer (looping tracks + one-shot jingles) ──
+  playMusic(key) {
+    this.ensure(); if (!this.ctx) return;
+    if (this.music.key === key && this.music.playing) return;
+    this.stopMusic();
+    const track = MUSIC[key]; if (!track) return;
+    this.music.key = key; this.music.playing = true;
+    this._loop(track, this.ctx.currentTime + 0.06);
+  },
+  _loop(track, t0) {
+    const beat = 60 / track.bpm; let t = t0;
+    for (const [note, beats] of track.notes) {
+      const dur = beats * beat;
+      if (note !== 'R') this._note(this.noteToFreq(note), dur, track.wave, track.gain, t, this.musicGain);
+      t += dur;
+    }
+    const ms = (t - this.ctx.currentTime) * 1000;
+    this.music.timer = setTimeout(() => {
+      if (!this.music.playing) return;
+      if (track.loop) this._loop(track, t); else this.music.playing = false;
+    }, Math.max(20, ms - 100));
+  },
+  stopMusic() { this.music.playing = false; if (this.music.timer) { clearTimeout(this.music.timer); this.music.timer = null; } this.music.key = null; },
+  _note(freq, dur, wave, gain, when, dest) {
+    if (!this.ctx || !freq) return;
+    const t = when != null ? when : this.ctx.currentTime;
+    const osc = this.ctx.createOscillator(), g = this.ctx.createGain();
+    osc.type = wave || 'square'; osc.frequency.value = freq;
+    osc.connect(g); g.connect(dest || this.sfxGain);
+    g.gain.setValueAtTime(gain != null ? gain : 0.5, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur * 0.9);
+    osc.start(t); osc.stop(t + dur + 0.03);
   },
   noteToFreq(name) {
     const S = { C:0, D:2, E:4, F:5, G:7, A:9, B:11 };
@@ -365,16 +542,7 @@ const Audio = {
     const semi = S[m[1]] + (m[2] === '#' ? 1 : m[2] === 'b' ? -1 : 0);
     return 440 * 2 ** ((+m[3] * 12 + semi - 57) / 12);
   },
-  blip(freq, dur, wave, gain, when) {
-    if (!this.ctx || this.muted || !freq) return;
-    const t = when != null ? when : this.ctx.currentTime;
-    const osc = this.ctx.createOscillator(), g = this.ctx.createGain();
-    osc.type = wave || 'square'; osc.frequency.value = freq;
-    osc.connect(g); g.connect(this.master);
-    g.gain.setValueAtTime((gain || 0.5), t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + dur * 0.9);
-    osc.start(t); osc.stop(t + dur + 0.03);
-  },
+  blip(freq, dur, wave, gain, when) { this._note(freq, dur, wave, gain, when, this.sfxGain); },
   sfx(name) {
     this.ensure(); if (!this.ctx) return;
     const n = this.noteToFreq.bind(this), t0 = this.ctx.currentTime;
@@ -392,29 +560,73 @@ const Audio = {
       default:      this.blip(n('A4'), .06, 'square', .3, t0);
     }
   },
-  toggleMute() { this.muted = !this.muted; if (this.master) this.master.gain.value = this.muted ? 0 : 0.5; },
+  toggleMute() { this.muted = !this.muted; this.applyGain(); Save.save(); updateHudButtons(); },
 };
 
 // ══════════════════════════════════════════════════════════════════
 //  FLOW — scene transitions
 // ══════════════════════════════════════════════════════════════════
-let _started = false;
-function firstGesture() {           // called on the first tap/keypress
-  Audio.ensure();
-  if (!_started) { _started = true; startGame(); }
-}
-function startGame() {
-  Game.level = 1;
-  reseed(pickSeed());                    // reseed → buildLevel() lays terrain + places hero
-  Game.scene = 'PLAY'; Game.t = 0; Game.lives = CONFIG.LIVES_START; Game.kills = 0;
-  Game.paused = false; Game.hero.face = 1;
-  document.getElementById('start').classList.add('hidden');
+// Scenes: TITLE → INTRO → PLAY → (boss) → CLEAR → INTRO/… → VICTORY;  PLAY→GAMEOVER on 0 lives.
+function firstGesture() { Audio.ensure(); }   // unlock audio on the very first gesture
+
+function startGame() {                         // TITLE → level 1
+  Game.level = 1; Game.lives = CONFIG.LIVES_START; Game.kills = 0;
+  reseed(pickSeed());
+  hideOverlay('start');
   Audio.sfx('start');
+  gotoIntro();
 }
-function togglePause() {
+function gotoIntro() {
+  Game.scene = 'INTRO'; Game.sceneT = 0; Game.paused = false;
+  buildLevel(); Game.hero.face = 1;
+  if (Game.level >= 4 && !Game.rainbowUnlocked) { Game.rainbowUnlocked = true; Save.save(); buildSwatches(); }
+  Game.best = Math.max(Game.best, Game.level); Save.save();
+  Audio.playMusic(Game.level);
+}
+function gotoPlay() { Game.scene = 'PLAY'; Game.t = 0; }
+
+// Fast entry straight into PLAY — used by the deterministic test harness.
+function startPlay() {
+  Game.level = 1; Game.lives = CONFIG.LIVES_START; Game.kills = 0;
+  reseed(pickSeed());
+  Game.scene = 'PLAY'; Game.t = 0; Game.sceneT = 0; Game.paused = false; Game.hero.face = 1;
+  hideOverlay('start');
+}
+
+function onBossDefeated() {
+  Game.bossActive = false;
+  Game.gainedLife = !Game.hitThisLevel;
+  if (Game.gainedLife) Game.lives++;            // no-hit-level bonus (may exceed 3)
+  Game.scene = 'CLEAR'; Game.sceneT = 0;
+  Audio.sfx('bossDie'); Audio.playMusic('clear');
+}
+function afterClear() {
+  if (Game.level >= 4) { Game.scene = 'VICTORY'; Game.sceneT = 0; Audio.playMusic('victory'); return; }
+  Game.level++;
+  gotoIntro();
+}
+function onGameOver() { Game.scene = 'GAMEOVER'; Game.sceneT = 0; Audio.stopMusic(); Audio.playMusic('gameover'); }
+function gotoTitle() {
+  Game.scene = 'TITLE'; Game.paused = false; Audio.stopMusic(); Audio.playMusic('title');
+  showOverlay('start'); hideOverlay('pause');
+}
+
+// Tap / key on a transient screen advances it.
+function tapAdvance() {
+  if (Game.scene === 'INTRO') gotoPlay();
+  else if (Game.scene === 'CLEAR') afterClear();
+  else if ((Game.scene === 'GAMEOVER' || Game.scene === 'VICTORY') && Game.sceneT > 0.5) gotoTitle();
+}
+function togglePause(force) {
   if (Game.scene !== 'PLAY') return;
-  Game.paused = !Game.paused;
+  Game.paused = (force != null) ? !!force : !Game.paused;
+  Audio.applyGain();
+  if (Game.paused) { showOverlay('pause'); buildSwatches(); } else hideOverlay('pause');
 }
+function quitToTitle() { hideOverlay('pause'); gotoTitle(); }
+
+function showOverlay(id) { document.getElementById(id).classList.remove('hidden'); }
+function hideOverlay(id) { document.getElementById(id).classList.add('hidden'); }
 
 // ══════════════════════════════════════════════════════════════════
 //  UPDATE — fixed-timestep simulation (dt is constant = CONFIG.DT)
@@ -424,6 +636,22 @@ function approach(cur, target, maxDelta) {
   if (cur < target) return Math.min(cur + maxDelta, target);
   if (cur > target) return Math.max(cur - maxDelta, target);
   return cur;
+}
+
+// ── Juice: particles + screen shake (cosmetic; uses Math.random, not the seed) ──
+function shake(mag) { Game.shakeMag = Math.max(Game.shakeMag, mag); Game.shakeT = 0.25; }
+function spawnBurst(x, y, color, n) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, s = 30 + Math.random() * 120;
+    Game.particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 40, life: 0.4 + Math.random() * 0.4, t: 0, color, r: 1 + (Math.random() * 2 | 0) });
+  }
+  if (Game.particles.length > 240) Game.particles.splice(0, Game.particles.length - 240);
+}
+function updateParticles(dt) {
+  if (Game.shakeT > 0) { Game.shakeT -= dt; if (Game.shakeT <= 0) Game.shakeMag = 0; }
+  const ps = Game.particles;
+  for (const p of ps) { p.t += dt; p.vy += 380 * dt; p.x += p.vx * dt; p.y += p.vy * dt; }
+  if (ps.length) Game.particles = ps.filter((p) => p.t < p.life);
 }
 
 // Solid ground top at column index, or null (hole / off-platform).
@@ -467,7 +695,7 @@ function heroDie() {
   h.dead = true;
   Game.hitThisLevel = true;
   Game.lives--;
-  Audio.sfx('die');
+  Audio.sfx('die'); spawnBurst(h.x, CONFIG.LAVA_Y, '#f4a300', 24); shake(8);
   if (Game.lives <= 0) { Game.lives = 0; onGameOver(); return; }   // GAME_OVER handled in P6
   respawnHero();
 }
@@ -483,8 +711,6 @@ function heroHurt(fromRight) {
   Audio.sfx('hurt');
   return true;
 }
-
-function onGameOver() { /* full flow in P6 */ }
 
 // ── Enemies + spawner ─────────────────────────────────────────────
 function spawnEnemy(type) {
@@ -535,7 +761,7 @@ function updateEnemies(dt) {
       const hl = h.x - h.w / 2, hr = h.x + h.w / 2, htop = h.y - h.h, hbot = h.y;
       if (hr > el && hl < er && hbot > etop && htop < ebot) {
         const stomp = h.vy > 0 && h.y < e.y - e.r;   // falling onto its top half
-        if (stomp) { e.alive = false; h.vy = -ENEMY.bounce; h.onGround = false; Game.kills++; Audio.sfx('stomp'); }
+        if (stomp) { e.alive = false; h.vy = -ENEMY.bounce; h.onGround = false; Game.kills++; Audio.sfx('stomp'); spawnBurst(e.x, e.y - e.r, ENEMY_COL[e.type] || '#fff', 12); shake(3); }
         else heroHurt(e.x > h.x);                     // hit → knock away from the enemy
       }
     }
@@ -555,29 +781,15 @@ function activateBoss() {
     iframe: 0, alive: true, startX: C.PLAT_X1 - 34, gaze: -1, jumpT: 0.5,
     feint: false, spikes: type === 'rainbow' ? 7 : 5,
   };
-  Audio.sfx('bossSpawn');
+  Audio.sfx('bossSpawn'); Audio.playMusic('boss'); shake(6);
 }
 
 function bossHit(b) {
   if (!b.alive || b.iframe > 0) return;
   b.hits++; b.iframe = BOSS.iframe; b.vy = -130; b.state = 'return';
-  Audio.sfx('bossHit');
-  if (b.hits >= b.maxHits) { b.alive = false; Game.boss = null; Audio.sfx('bossDie'); onBossDefeated(); }
+  Audio.sfx('bossHit'); spawnBurst(b.x, b.y - b.r, ENEMY_COL[b.type] || '#fff', 14); shake(4);
+  if (b.hits >= b.maxHits) { b.alive = false; Game.boss = null; spawnBurst(b.x, b.y - b.r, '#fff', 30); shake(9); onBossDefeated(); }
 }
-
-function onBossDefeated() {
-  Game.bossActive = false;
-  if (!Game.hitThisLevel) Game.lives++;    // no-hit-level bonus (may exceed 3)
-  advanceLevel();                          // P6 wraps this with intro/clear screens
-}
-
-function advanceLevel() {
-  if (Game.level >= 4) { Game.scene = 'VICTORY'; return; }
-  Game.level++;
-  reseedKeep();                            // new terrain, keep the same run seed base
-  Game.t = 0;
-}
-function reseedKeep() { Game.rand = mulberry32(Game.seed ^ Math.imul(Game.level, 0x85EBCA6B)); buildLevel(); }
 
 function updateBoss(dt) {
   const b = Game.boss; if (!b || !b.alive) return;
@@ -640,8 +852,15 @@ function updateBoss(dt) {
 }
 
 function update(dt) {
-  Game.t += dt;
-  if (Game.scene !== 'PLAY' || dt === 0) return;
+  Game.sceneT += dt;
+  if (Game.scene === 'PLAY' && !Game.paused) Game.t += dt;
+  updateParticles(dt);
+
+  // transient screens auto-advance (tap advances sooner via tapAdvance)
+  if (Game.scene === 'INTRO' && Game.sceneT >= 1.6) { gotoPlay(); return; }
+  if (Game.scene === 'CLEAR' && Game.sceneT >= 2.4) { afterClear(); return; }
+  if (Game.scene !== 'PLAY' || Game.paused) return;
+
   const h = Game.hero, C = CONFIG;
 
   // timers
@@ -870,17 +1089,72 @@ function drawBoss() {
   }
 }
 
+function drawParticles() {
+  for (const p of Game.particles) {
+    ctx.globalAlpha = Math.max(0, 1 - p.t / p.life);
+    ctx.fillStyle = p.color;
+    ctx.fillRect(Math.round(p.x), Math.round(p.y), p.r, p.r);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawHeart(x, y, filled) {
+  ctx.fillStyle = filled ? '#e0392f' : 'rgba(255,255,255,0.18)';
+  ctx.fillRect(x + 1, y, 2, 1); ctx.fillRect(x + 5, y, 2, 1);
+  ctx.fillRect(x, y + 1, 8, 3);
+  ctx.fillRect(x + 1, y + 4, 6, 1); ctx.fillRect(x + 2, y + 5, 4, 1); ctx.fillRect(x + 3, y + 6, 2, 1);
+}
+
+function drawHUD() {
+  const C = CONFIG;
+  ctx.textBaseline = 'top'; ctx.font = '8px monospace';
+  // lives (hearts; overflow shown as ×N)
+  const shown = Math.min(Game.lives, 6);
+  for (let i = 0; i < shown; i++) drawHeart(6 + i * 11, 7, true);
+  ctx.fillStyle = '#eee8d5';
+  if (Game.lives > 6) ctx.fillText('x' + Game.lives, 6 + 6 * 11 + 2, 7);
+  // level name + score (top-left, second row; kept clear of the top-right buttons)
+  ctx.fillStyle = '#93a1a1'; ctx.fillText('LV' + Game.level + ' ' + (LEVEL_NAMES[Game.level] || ''), 6, 18);
+  ctx.fillStyle = '#8a9ba0'; ctx.fillText('KILLS ' + Game.kills, 6, 28);
+  // timer / boss flag (centre)
+  if (Game.scene === 'PLAY') {
+    if (Game.bossActive) { ctx.textAlign = 'center'; ctx.fillStyle = '#e0392f'; ctx.font = '10px monospace'; ctx.fillText('◆ BOSS ◆', C.W / 2, 7); ctx.textAlign = 'left'; }
+    else {
+      const remain = Math.max(0, Math.ceil(C.LEVEL_TIME - Game.t));
+      ctx.textAlign = 'center'; ctx.fillStyle = remain <= 10 ? '#f4d03f' : '#eee8d5'; ctx.font = '11px monospace';
+      ctx.fillText(remain + '', C.W / 2, 7); ctx.textAlign = 'left';
+    }
+  }
+}
+
+function centerText(lines) {
+  const C = CONFIG;
+  ctx.fillStyle = 'rgba(6,8,18,0.55)'; ctx.fillRect(0, 0, C.W, C.H);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  let y = C.H / 2 - (lines.length - 1) * 12;
+  for (const ln of lines) {
+    ctx.font = (ln.big ? 'bold 22px' : '10px') + ' monospace';
+    ctx.fillStyle = ln.color || '#eee8d5';
+    ctx.fillText(ln.t, C.W / 2, y); y += ln.big ? 26 : 15;
+  }
+  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+}
+
 function render() {
   const C = CONFIG;
+  ctx.save();
+  // screen shake
+  if (Game.shakeMag > 0) {
+    const m = Game.shakeMag * (Game.shakeT / 0.25);
+    ctx.translate((Math.random() * 2 - 1) * m, (Math.random() * 2 - 1) * m);
+  }
+
   // Sky
   const g = ctx.createLinearGradient(0, 0, 0, C.H);
   g.addColorStop(0, '#241a2e'); g.addColorStop(1, '#3a1f2b');
-  ctx.fillStyle = g; ctx.fillRect(0, 0, C.W, C.H);
+  ctx.fillStyle = g; ctx.fillRect(-8, -8, C.W + 16, C.H + 16);
 
-  // Bubbling lava lake (full width; tower columns painted over solid ground)
   drawLava();
-
-  // Tower columns + platform tops (holes are left as lava chutes)
   drawTerrain();
 
   // Spawner cube (floats + wobbles above the platform)
@@ -888,33 +1162,25 @@ function render() {
   const sx = C.SPAWN_X, sy = C.SPAWN_Y + bob;
   ctx.fillStyle = '#0c0c10'; ctx.fillRect(sx - 13, sy - 13, 26, 26);
   ctx.fillStyle = '#23252e'; ctx.fillRect(sx - 13, sy - 13, 26, 3);
-  // glowing maw
   const mawGlow = 0.5 + 0.5 * Math.sin(Game.t * 5);
   ctx.fillStyle = `rgba(230,57,47,${0.5 + 0.4 * mawGlow})`;
   ctx.fillRect(sx - 6, sy - 2, 12, 9);
   ctx.fillStyle = '#0c0c10'; ctx.fillRect(sx - 2, sy - 13, 5, 8);
   ctx.fillRect(sx - 9, sy + 4, 18, 3);
 
-  // Enemies + boss (behind the hero) + hero
-  if (Game.scene === 'PLAY') { drawEnemies(); drawBoss(); drawHero(); }
+  const live = Game.scene === 'PLAY' || Game.scene === 'INTRO' || Game.scene === 'CLEAR';
+  if (live) { drawEnemies(); drawBoss(); drawHero(); }
+  drawParticles();
 
-  // HUD (minimal placeholder; full HUD in P6)
-  ctx.fillStyle = '#eee8d5';
-  ctx.font = '10px monospace';
-  ctx.textBaseline = 'top';
-  ctx.fillText('LV ' + Game.level + '   ♥×' + Game.lives, 6, 6);
-  if (Game.scene === 'PLAY') {
-    const remain = Math.max(0, Math.ceil(CONFIG.LEVEL_TIME - Game.t));
-    const txt = Game.paused ? 'PAUSED' : Game.bossActive ? 'BOSS' : (remain + 's');
-    ctx.textAlign = 'center'; ctx.fillStyle = Game.bossActive ? '#e0392f' : '#eee8d5';
-    ctx.fillText(txt, C.W / 2, 6); ctx.textAlign = 'left';
-  } else if (Game.scene === 'VICTORY') {
-    ctx.textAlign = 'center'; ctx.fillStyle = '#f4d03f'; ctx.font = '20px monospace';
-    ctx.fillText('VICTORY!', C.W / 2, C.H / 2 - 10);
-    ctx.font = '10px monospace'; ctx.fillStyle = '#eee8d5';
-    ctx.fillText('kills ' + Game.kills + '   lives ' + Game.lives, C.W / 2, C.H / 2 + 14);
-    ctx.textAlign = 'left';
-  }
+  if (Game.scene === 'PLAY' || Game.scene === 'INTRO' || Game.scene === 'CLEAR') drawHUD();
+
+  // Scene overlays (canvas-drawn transient screens)
+  if (Game.scene === 'INTRO') centerText([{ t: 'LEVEL ' + Game.level, big: true, color: '#f4d03f' }, { t: LEVEL_NAMES[Game.level] || '', color: '#eee8d5' }, { t: 'survive 60 seconds, then the boss', color: '#93a1a1' }]);
+  else if (Game.scene === 'CLEAR') centerText([{ t: 'LEVEL CLEAR', big: true, color: '#7cb342' }].concat(Game.gainedLife ? [{ t: '★ no-hit bonus: +1 life! ★', color: '#f4d03f' }] : [{ t: 'kills ' + Game.kills, color: '#93a1a1' }]));
+  else if (Game.scene === 'GAMEOVER') centerText([{ t: 'GAME OVER', big: true, color: '#e0392f' }, { t: 'reached level ' + Game.level, color: '#eee8d5' }, { t: 'tap to return to title', color: '#93a1a1' }]);
+  else if (Game.scene === 'VICTORY') centerText([{ t: 'VICTORY!', big: true, color: '#f4d03f' }, { t: 'you conquered the tower', color: '#eee8d5' }, { t: 'kills ' + Game.kills + '  ·  lives ' + Game.lives, color: '#93a1a1' }, { t: 'tap to return to title', color: '#93a1a1' }]);
+
+  ctx.restore();
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -931,7 +1197,7 @@ function tick(now) {
     let guard = 0;
     while (acc >= CONFIG.DT && guard++ < 600) { update(CONFIG.DT); acc -= CONFIG.DT; }
   } else {
-    update(0);                              // keep title timers ticking lightly
+    update(el);                             // transient scenes (INTRO/CLEAR/…) advance in real time
   }
   _fpsN++; _fpsT += el; if (_fpsT >= 0.5) { Game.fps = Math.round(_fpsN / _fpsT); _fpsN = 0; _fpsT = 0; }
   render();
@@ -951,36 +1217,33 @@ function resize() {
 }
 addEventListener('resize', resize);
 addEventListener('orientationchange', resize);
-document.addEventListener('visibilitychange', () => { if (document.hidden && Game.scene === 'PLAY') Game.paused = true; });
-addEventListener('blur', () => { if (Game.scene === 'PLAY') Game.paused = true; });
+document.addEventListener('visibilitychange', () => { if (document.hidden && Game.scene === 'PLAY' && !Game.paused) togglePause(true); });
+addEventListener('blur', () => { if (Game.scene === 'PLAY' && !Game.paused) togglePause(true); });
 
 // ══════════════════════════════════════════════════════════════════
 //  BOOT
 // ══════════════════════════════════════════════════════════════════
+Save.load();
 reseed(pickSeed());
 initInput();
 resize();
+Game.scene = 'TITLE';
 requestAnimationFrame(tick);
 
 // ── Test hook: pure logic + deterministic stepping for Playwright ──
 window.BS = {
-  version: '0.1.0-P1',
-  CONFIG, PALETTE,
+  version: '0.6.0-P6',
+  CONFIG, PALETTE, LEVELS, LEVEL_NAMES, MUSIC,
   mulberry32,
   state: () => Game,
   scene: () => Game.scene,
   seed: () => Game.seed,
   reseed,
-  // Terrain (pure generator + active instance) for fairness tests.
-  genTerrain,
-  surfaceAt,
-  findSafeX,
+  genTerrain, surfaceAt, findSafeX,
   terrain: () => Game.terrain,
   setLevel: (n) => { Game.level = n | 0; buildLevel(); },
   hero: () => Game.hero,
-  heroHurt,           // simulate an enemy/boss hit (P4/P5 call this internally)
-  respawnHero,
-  LEVELS,
+  heroHurt, respawnHero,
   enemies: () => Game.enemies,
   spawnEnemy,
   boss: () => Game.boss,
@@ -988,11 +1251,17 @@ window.BS = {
   bossHit: () => Game.boss && bossHit(Game.boss),
   Input,
   audioState: () => (Audio.ctx ? Audio.ctx.state : 'none'),
-  start: startGame,
+  musicKey: () => Audio.music.key,
+  muted: () => Audio.muted,
+  Save,
+  // Flow controls
+  start: startPlay,          // straight into PLAY (deterministic test entry)
+  startGame,                 // real title→intro flow
+  gotoPlay, tapAdvance, gotoTitle,
   pause: togglePause,
   isPaused: () => Game.paused,
-  // Deterministic simulation stepping (bypasses rAF timing) for physics tests.
-  // freeze() stops the rAF loop from advancing physics so stepFixed is authoritative.
+  buildSwatches,
+  // Deterministic stepping (bypasses rAF) for physics tests.
   freeze: (on) => { testFreeze = !!on; },
   step: (dt) => update(dt),
   stepFixed: (n) => { for (let i = 0; i < (n | 0); i++) update(CONFIG.DT); },
