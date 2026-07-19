@@ -267,7 +267,7 @@ const LEVELS = {
   5: { types: ['clear', 'red', 'yellow'], spawnEvery: 1.3, speed: 34, maxAlive: 8, boss: 'volcano' },
 };
 const LAST_LEVEL = 5;
-const ENEMY = { r: 7, speedMul: { clear: 1, red: 1.7, yellow: 1 }, bounce: 230, jumpImpulse: 205, gravity: 900, leapV: 250, leapVX: 118 };
+const ENEMY = { r: 7, speedMul: { clear: 1, red: 1.7, yellow: 1 }, bounce: 300, jumpImpulse: 205, gravity: 900, leapV: 250, leapVX: 118 };
 const BOSS = {
   r: 17, hits: 3, iframe: 0.9, returnSpeed: 95, jumpImpulse: 250, freeze: 5,
   charge:   { clear: 55, red: 108, yellow: 82, rainbow: 122, volcano: 100 },   // charge speed per level boss
@@ -747,7 +747,7 @@ function drawHeroPreview() {
   if (Game.mode === 'rage') drawArmKnife(c, x, my + 2, -1);
   c.restore();
   // thin white outline (drawn at native resolution so it doesn't scale up thick)
-  c.strokeStyle = 'rgba(255,255,255,0.85)'; c.lineWidth = 1.5;
+  c.strokeStyle = 'rgba(150,156,166,0.9)'; c.lineWidth = 1.5;
   c.strokeRect(x * 4 - 1, y * 4 - 1, w * 4 + 2, (h - 2) * 4 + 2);
 }
 
@@ -1713,8 +1713,8 @@ function drawHero() {
   const my = y + (h.h >> 1);
   if (Game.mode === 'normal' || Game.mode === 'rage') drawArmKnife(ctx, x + h.w, my, 1);
   if (Game.mode === 'rage') drawArmKnife(ctx, x, my + 2, -1);
-  // white outline so the hero reads on dark backgrounds
-  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  // gray outline so the hero reads on dark backgrounds
+  ctx.fillStyle = 'rgba(150,156,166,0.9)';
   ctx.fillRect(x - 1, y - 1, h.w + 2, 1); ctx.fillRect(x - 1, y + h.h - 2, h.w + 2, 1);
   ctx.fillRect(x - 1, y - 1, 1, h.h); ctx.fillRect(x + h.w, y - 1, 1, h.h);
   ctx.restore();
