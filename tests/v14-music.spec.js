@@ -28,7 +28,23 @@ test('short jingles stay small (negative control: not multi-voice)', async ({ pa
 
 test('a genre song outlives the old short loop (long arrangement)', async ({ page }) => {
   await openGame(page);
-  // The title track alone spans 16 bars of bass — far more notes than any old ~14-note loop.
+  // The title track alone spans many bars of bass — far more than any old ~14-note loop.
   const bassNotes = await page.evaluate(() => window.BS.trackBars('title'));
   expect(bassNotes).toBeGreaterThanOrEqual(16);
+});
+
+test('every layered song has all layers the same length (no desync / lead-drop tail)', async ({ page }) => {
+  await openGame(page);
+  const r = await page.evaluate((keys) => keys.map((k) => ({ k: String(k), bars: window.BS.trackLayerBars(k) })), SONGS);
+  for (const { k, bars } of r) {
+    expect(bars.length, `song ${k} has layers`).toBeGreaterThan(1);
+    for (const b of bars) expect(b, `song ${k} layer bars`).toBeCloseTo(bars[0], 6);   // all layers equal → loops cleanly
+  }
+});
+
+test('the title & merchant songs are multi-section (long, with a build/drop)', async ({ page }) => {
+  await openGame(page);
+  const bars = await page.evaluate(() => ({ title: window.BS.trackBars('title'), merchant: window.BS.trackBars('merchant') }));
+  expect(bars.title).toBeGreaterThanOrEqual(48);      // long enough to sit and listen
+  expect(bars.merchant).toBeGreaterThanOrEqual(40);   // intro→build→drop→breakdown
 });
