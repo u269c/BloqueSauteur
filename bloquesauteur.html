@@ -39,9 +39,10 @@
   .overlay {
     position:fixed; inset:0; z-index:20;
     display:flex; flex-direction:column; align-items:center; justify-content:center;
-    gap:2.4vmin; text-align:center; color:#eee8d5; padding:6vmin;
+    gap:1.8vmin; text-align:center; color:#eee8d5; padding:3vmin; overflow-y:auto;
     background:rgba(6,8,18,0.72);
   }
+  #start h1 { margin-bottom:0; }
   .overlay.hidden { display:none; }
   .hidden { display:none !important; }
   .overlay h1 { font-size:min(11vmin,74px); letter-spacing:.06em; color:#f4d03f; text-shadow:3px 3px 0 #d63031; }
@@ -69,62 +70,59 @@
 
   /* Colour picker */
   .picker-label { font-size:min(3.4vmin,15px); color:#93a1a1; letter-spacing:.08em; text-transform:uppercase; }
-  .swatches { display:grid; grid-template-columns:repeat(5,1fr); gap:1.6vmin; max-width:min(76vw,360px); }
-  .swatch {
-    width:11vmin; height:11vmin; max-width:56px; max-height:56px; min-width:38px; min-height:38px;
-    border-radius:10px; border:3px solid rgba(255,255,255,0.18); cursor:pointer; position:relative;
-    padding:0; background-clip:padding-box;
-  }
-  .swatch.sel { border-color:#fff; box-shadow:0 0 0 2px #f4d03f; }
-  .swatch.locked { cursor:not-allowed; }
-  .swatch.locked::after { content:'🔒'; position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:min(5vmin,22px); }
-  .swatch.rainbow { background:linear-gradient(120deg,#e0392f,#f4d03f,#7cb342,#39a0ed,#e0348b); }
-
   .play-btn {
-    margin-top:1vmin; padding:2vmin 6vmin; font-size:min(5vmin,22px); font-weight:700;
+    margin-top:1.5vmin; padding:2vmin 7vmin; font-size:min(5vmin,22px); font-weight:700;
     color:#101018; background:#f4d03f; border:none; border-radius:12px; cursor:pointer;
     letter-spacing:.05em; box-shadow:0 4px 0 #b58900;
   }
   .play-btn:active { transform:translateY(2px); box-shadow:0 2px 0 #b58900; }
   .play-btn.ghost { background:transparent; color:#b6c2c6; border:2px solid rgba(255,255,255,0.25); box-shadow:none; font-size:min(3.8vmin,17px); padding:1.4vmin 4vmin; }
 
-  /* Mode selector */
-  .modes { display:flex; gap:1.6vmin; flex-wrap:wrap; justify-content:center; }
-  .mode-btn {
-    padding:1.4vmin 3.2vmin; font-size:min(3.8vmin,17px); font-weight:700; letter-spacing:.03em;
-    color:#b6c2c6; background:rgba(255,255,255,0.06); border:2px solid rgba(255,255,255,0.2);
-    border-radius:10px; cursor:pointer;
+  /* ── Single-screen loadout: [big hero] [colour squares] [mode buttons] ── */
+  .loadout { display:flex; align-items:center; justify-content:center; gap:3vmin; margin-top:0.5vmin; }
+  #hero-preview { image-rendering:pixelated; height:min(26vmin,150px); width:auto; background:rgba(255,255,255,0.05); border:2px solid rgba(255,255,255,0.14); border-radius:10px; padding:4px; }
+
+  /* colour squares: a compact 2-wide vertical block beside the hero */
+  .swatches { display:grid; grid-template-columns:repeat(2,1fr); gap:1.1vmin; }
+  .swatch {
+    width:min(5.5vmin,26px); height:min(5.5vmin,26px); border-radius:6px;
+    border:2px solid rgba(255,255,255,0.18); cursor:pointer; position:relative; padding:0; background-clip:padding-box;
   }
-  .mode-btn.sel { color:#101018; background:#eee8d5; border-color:#fff; }
-  /* distinct per-mode tints so the choices read at a glance */
+  .swatch.sel { border-color:#fff; box-shadow:0 0 0 2px #f4d03f; transform:scale(1.12); }
+  .swatch.locked { cursor:not-allowed; }
+  .swatch.locked::after { content:'🔒'; position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:min(3vmin,13px); }
+  .swatch.rainbow { background:linear-gradient(120deg,#e0392f,#f4d03f,#7cb342,#39a0ed,#e0348b); }
+
+  /* mode buttons: vertical stack beside the hero */
+  .modes { display:flex; flex-direction:column; gap:1.2vmin; }
+  .mode-btn {
+    padding:1.3vmin 3vmin; font-size:min(3.6vmin,16px); font-weight:700; letter-spacing:.03em;
+    color:#b6c2c6; background:rgba(255,255,255,0.06); border:2px solid rgba(255,255,255,0.2);
+    border-radius:9px; cursor:pointer; min-width:min(30vmin,140px); text-align:center;
+  }
   .mode-btn.easy   { border-color:#7cb342; color:#a6d977; }
   .mode-btn.normal { border-color:#39a0ed; color:#8fcdf5; }
   .mode-btn.rage   { border-color:#e0392f; color:#f19086; }
-  .mode-btn.easy.sel   { background:#7cb342; color:#0d1a06; }
-  .mode-btn.normal.sel { background:#39a0ed; color:#04121d; }
-  .mode-btn.rage.sel   { background:#e0392f; color:#fff; border-color:#ff6a5a; }
-  .mode-desc { font-size:min(3.3vmin,14px); color:#93a1a1; max-width:34ch; min-height:2.6em; line-height:1.3; }
+  .mode-btn.easy.sel   { background:#7cb342; color:#0d1a06; box-shadow:0 0 0 2px #cdeeaa; }
+  .mode-btn.normal.sel { background:#39a0ed; color:#04121d; box-shadow:0 0 0 2px #b8e0ff; }
+  .mode-btn.rage.sel   { background:#e0392f; color:#fff; border-color:#ff6a5a; box-shadow:0 0 0 2px #ffb3aa; }
+  .mode-desc { font-size:min(3vmin,12px); color:#93a1a1; max-width:48ch; min-height:1.2em; line-height:1.25; margin:.6vmin 6vmin 0; }
 
-  /* Colour picker row with live hero preview */
-  .picker-row { display:flex; align-items:center; gap:2.4vmin; }
-  #hero-preview { width:auto; height:min(22vmin,104px); image-rendering:pixelated; background:rgba(255,255,255,0.06); border:2px solid rgba(255,255,255,0.18); border-radius:8px; padding:2px; }
-
-  /* Save slots */
+  /* Save slots — a row of 3 boxes at the top */
   .slots { display:flex; gap:2vmin; flex-wrap:wrap; justify-content:center; }
   .slot-card {
-    position:relative; width:min(38vw,180px); padding:2.2vmin; cursor:pointer; text-align:left;
+    position:relative; width:min(30vw,168px); padding:1.8vmin; cursor:pointer; text-align:left;
     background:rgba(255,255,255,0.06); border:2px solid rgba(255,255,255,0.2); border-radius:12px; color:#eee8d5;
   }
   .slot-card:hover { background:rgba(255,255,255,0.12); border-color:#f4d03f; }
-  .slot-card .slot-name { font-weight:700; font-size:min(4.4vmin,20px); color:#f4d03f; }
-  .slot-card .slot-sum { font-size:min(3.2vmin,13px); color:#b6c2c6; margin-top:.5em; line-height:1.4; }
-  .slot-card .acq { display:flex; gap:3px; margin-top:.6em; align-items:center; min-height:22px; flex-wrap:wrap; }
-  .slot-card .acq canvas { width:20px; height:20px; image-rendering:pixelated; }
-  .slot-card .acq-none { font-size:min(2.8vmin,11px); color:#7a8a90; font-style:italic; }
-  .slot-card .slot-del { position:absolute; top:6px; right:8px; color:#93a1a1; font-size:min(3.6vmin,16px); background:none; border:none; cursor:pointer; }
+  .slot-card.sel { border-color:#f4d03f; background:rgba(244,208,63,0.14); box-shadow:0 0 0 2px #f4d03f; }
+  .slot-card .slot-name { font-weight:700; font-size:min(4.2vmin,19px); color:#f4d03f; }
+  .slot-card .slot-sum { font-size:min(3vmin,12px); color:#b6c2c6; margin-top:.4em; line-height:1.4; }
+  .slot-card .acq { display:flex; gap:3px; margin-top:.5em; align-items:center; min-height:20px; flex-wrap:wrap; }
+  .slot-card .acq canvas { width:18px; height:18px; image-rendering:pixelated; }
+  .slot-card .acq-none { font-size:min(2.6vmin,10px); color:#7a8a90; font-style:italic; }
+  .slot-card .slot-del { position:absolute; top:5px; right:7px; color:#93a1a1; font-size:min(3.4vmin,15px); background:none; border:none; cursor:pointer; }
   .slot-card .slot-del:hover { color:#e0392f; }
-  .slot-back { align-self:flex-start; background:none; border:none; color:#93a1a1; font-size:min(3.6vmin,16px); cursor:pointer; padding:0 0 1vmin; }
-  .slot-back:hover { color:#eee8d5; }
 
   /* Merchant shop */
   .shop-bubble { background:#faf3e0; color:#2a2320; border:3px solid #2a2320; border-radius:18px; padding:3vmin; max-width:min(92vw,520px); box-shadow:0 6px 0 rgba(0,0,0,0.3); }
@@ -164,25 +162,15 @@
   <div class="overlay" id="start">
     <h1>BLOQUE&nbsp;SAUTEUR</h1>
 
-    <div id="slot-panel">
-      <p>Choose a save slot.</p>
-      <div class="slots" id="slots"></div>
-    </div>
+    <div class="slots" id="slots"></div>
 
-    <div id="play-panel" class="hidden">
-      <button class="slot-back" id="slot-back">◀ slots</button>
-      <div class="picker-label">Mode</div>
+    <div class="loadout">
+      <canvas id="hero-preview" width="120" height="120" aria-label="hero preview"></canvas>
+      <div class="swatches" id="swatches"></div>
       <div class="modes" id="modes"></div>
-      <p class="mode-desc" id="mode-desc"></p>
-      <div class="picker-label">Your colour</div>
-      <div class="picker-row">
-        <canvas id="hero-preview" width="48" height="60" aria-label="hero preview"></canvas>
-        <div class="swatches" id="swatches"></div>
-      </div>
-      <button class="play-btn" id="play-btn">▶ PLAY</button>
     </div>
-
-    <p class="hint">Arrow keys ← → move, ↑ jump &nbsp;·&nbsp; or the on-screen buttons</p>
+    <p class="mode-desc" id="mode-desc"></p>
+    <button class="play-btn" id="play-btn">▶ PLAY</button>
     <p class="version" id="version"></p>
   </div>
 
@@ -641,7 +629,6 @@ function initInput() {
   const on = (id, fn) => document.getElementById(id).addEventListener('click', (e) => { e.preventDefault(); onFirstGesture(); fn(); });
   on('play-btn', () => startGame());
   on('shop-leave', () => closeShop());
-  on('slot-back', () => showSlotPanel());
   on('resume-btn', () => togglePause(false));
   on('quit-btn', () => quitToTitle());
   on('pause-btn', () => { if (Game.scene === 'PLAY') togglePause(); });
@@ -686,9 +673,9 @@ function buildSwatches() {
 }
 
 const MODE_DESC = {
-  easy: 'Relaxed. Monster hits are harmless — only falling in the hazard costs a heart. Weakest bosses.',
-  normal: 'The real deal. A hit chips ¼ heart; clear a level flawlessly for a bonus heart. Bosses 3→6 HP.',
-  rage: 'Brutal. TWO spawn boxes; a hit costs ½ heart AND −1 point; no flawless bonus. Bosses 6→12 HP.',
+  easy: 'Relaxed — hits are harmless; only the hazard hurts. +1 heart per level.',
+  normal: 'A hit chips ¼ heart; +1 heart per level. Bosses 3→6 HP.',
+  rage: 'Two spawners; hits cost ½ heart + 1 point; no heart bonus. Bosses 6→12.',
 };
 function buildModes() {
   const box = document.getElementById('modes'); if (!box) return;
@@ -697,7 +684,7 @@ function buildModes() {
     const b = document.createElement('button');
     b.className = 'mode-btn ' + key + (key === Game.mode ? ' sel' : '');
     b.textContent = MODES[key].name;
-    b.addEventListener('click', (e) => { e.preventDefault(); onFirstGesture(); Game.mode = key; Save.save(); buildModes(); });
+    b.addEventListener('click', (e) => { e.preventDefault(); onFirstGesture(); Game.mode = key; Save.save(); buildModes(); drawHeroPreview(); });
     box.appendChild(b);
   }
   const d = document.getElementById('mode-desc'); if (d) d.textContent = MODE_DESC[Game.mode] || '';
@@ -719,7 +706,7 @@ function buildSlots() {
   box.innerHTML = '';
   for (let i = 0; i < 3; i++) {
     const s = Save.slot(i);
-    const card = document.createElement('div'); card.className = 'slot-card';
+    const card = document.createElement('div'); card.className = 'slot-card' + (Save.data.activeSlot === i ? ' sel' : '');
     const name = document.createElement('div'); name.className = 'slot-name'; name.textContent = 'SLOT ' + (i + 1);
     const sum = document.createElement('div'); sum.className = 'slot-sum';
     sum.textContent = s ? ('Best: LV' + (s.best || 0) + '  ·  ' + (MODES[s.mode] ? MODES[s.mode].name : 'NORMAL')) : 'Empty · New Game';
@@ -734,31 +721,40 @@ function buildSlots() {
     box.appendChild(card);
   }
 }
+// Select a slot: load it and refresh the whole single-screen loadout.
 function selectSlot(i) {
   Save.select(i);
-  buildSwatches(); buildModes(); drawHeroPreview();
-  showPlayPanel();
+  buildSlots(); buildSwatches(); buildModes(); drawHeroPreview();
 }
-function showSlotPanel() { buildSlots(); document.getElementById('slot-panel').classList.remove('hidden'); document.getElementById('play-panel').classList.add('hidden'); }
-function showPlayPanel() { document.getElementById('slot-panel').classList.add('hidden'); document.getElementById('play-panel').classList.remove('hidden'); }
-function showTitlePanel() { if (Save.data.activeSlot != null) { buildSwatches(); buildModes(); drawHeroPreview(); showPlayPanel(); } else showSlotPanel(); }
+// Title is one screen now: ensure a slot is active, then draw everything.
+function showTitlePanel() {
+  if (Save.data.activeSlot == null) Save.select(0);
+  buildSlots(); buildSwatches(); buildModes(); drawHeroPreview();
+}
 
 function drawHeroPreview() {
   const cv = document.getElementById('hero-preview'); if (!cv) return;
   const c = cv.getContext('2d'); c.clearRect(0, 0, cv.width, cv.height);
-  c.save(); c.scale(2, 2);                       // 2x so the sprite (and costume) reads clearly
+  c.imageSmoothingEnabled = false;
+  c.save(); c.scale(4, 4);                        // large so colour + costume + arms read clearly
   const p = PALETTE[Game.hero.colorIdx];
   const col = (p && p.rainbow) ? 'hsl(200 90% 62%)' : (p && p.css) || '#39a0ed';
-  const x = 6, y = 5, w = 12, h = 16;
-  c.fillStyle = '#0a0a0a'; c.fillRect(x + 1, y + h - 2, 3, 4); c.fillRect(x + w - 4, y + h - 2, 3, 4);
-  c.fillRect(x, y, w, h - 2);
-  if (Game.owned && Game.owned.costume) {          // striped suit if owned
+  const x = 9, y = 6, w = 12, h = 16;
+  c.fillStyle = '#0a0a0a'; c.fillRect(x + 1, y + h - 2, 3, 4); c.fillRect(x + w - 4, y + h - 2, 3, 4);   // legs
+  c.fillRect(x, y, w, h - 2);                     // body
+  if (Game.owned && Game.owned.costume) {          // striped suit
     for (let sx = 2; sx < w - 2; sx += 3) { c.fillStyle = ((sx >> 1) & 1) ? col : '#eee8d5'; c.fillRect(x + sx, y + 2, 2, h - 6); }
   } else {
     c.fillStyle = col; c.fillRect(x + 2, y + 2, w - 4, 3); c.fillRect(x + (w >> 1) - 1, y + 2, 3, h - 8);
   }
   c.fillStyle = 'rgba(255,255,255,0.22)'; c.fillRect(x + 2, y + 2, w - 4, 1);
-  c.fillStyle = '#fff'; c.fillRect(x + w - 4, y + 6, 2, 2);
+  c.fillStyle = '#fff'; c.fillRect(x + w - 4, y + 6, 2, 2);   // eye
+  const my = y + (h >> 1);                         // per-mode arms + knives
+  if (Game.mode === 'normal' || Game.mode === 'rage') drawArmKnife(c, x + w, my, 1);
+  if (Game.mode === 'rage') drawArmKnife(c, x, my + 2, -1);
+  c.fillStyle = 'rgba(255,255,255,0.85)';          // white outline
+  c.fillRect(x - 1, y - 1, w + 2, 1); c.fillRect(x - 1, y + h - 2, w + 2, 1);
+  c.fillRect(x - 1, y - 1, 1, h); c.fillRect(x + w, y - 1, 1, h);
   c.restore();
 }
 

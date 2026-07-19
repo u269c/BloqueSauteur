@@ -17,10 +17,10 @@ async function openGame(page, params = {}) {
   return page;
 }
 
-/** From the title, pick a save slot to reveal the play panel (mode/colour/PLAY). */
+/** From the single-screen title, select a save slot (loadout + PLAY are always shown). */
 async function enterPlayPanel(page, slot = 0) {
   await page.locator('#slots .slot-card').nth(slot).click();
-  await page.waitForSelector('#play-panel:not(.hidden)');
+  await page.waitForSelector('#play-btn');
 }
 
 module.exports = { GAME_PATH, gameUrl, openGame, enterPlayPanel };

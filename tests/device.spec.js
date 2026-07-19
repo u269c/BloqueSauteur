@@ -29,7 +29,7 @@ test('layout: no horizontal page scroll; canvas + controls fit the viewport', as
 test('real touch: PLAY starts, jump button lifts the hero, right button moves it', async ({ page }) => {
   await openGame(page, { seed: 1 });
   await page.locator('#slots .slot-card').first().tap();        // pick a save slot
-  await page.waitForSelector('#play-panel:not(.hidden)');
+  await page.waitForSelector('#play-btn');
   await page.locator('#play-btn').tap();                        // real touch tap
   await page.waitForFunction(() => window.BS.scene() === 'INTRO');
   // advance the intro by tapping the canvas
