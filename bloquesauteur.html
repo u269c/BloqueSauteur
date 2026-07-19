@@ -277,23 +277,25 @@ const LEVELS = {
   2: { types: ['clear', 'red'],           spawnEvery: 2.0, speed: 26, maxAlive: 5, boss: 'red'     },
   3: { types: ['clear', 'red', 'yellow'], spawnEvery: 2.0, speed: 26, maxAlive: 6, boss: 'yellow'  },
   4: { types: ['clear', 'red', 'yellow'], spawnEvery: 1.4, speed: 32, maxAlive: 7, boss: 'rainbow' },
+  5: { types: ['clear', 'red', 'yellow'], spawnEvery: 1.3, speed: 34, maxAlive: 8, boss: 'volcano' },
 };
+const LAST_LEVEL = 5;
 const ENEMY = { r: 7, speedMul: { clear: 1, red: 1.7, yellow: 1 }, bounce: 230, jumpImpulse: 205, gravity: 900, leapV: 250, leapVX: 118 };
 const BOSS = {
-  r: 17, hits: 3, iframe: 0.9, returnSpeed: 95, jumpImpulse: 250,
-  charge:   { clear: 55, red: 108, yellow: 82, rainbow: 122 },   // charge speed per level boss
-  idleWait: { clear: 1.2, red: 0.9, yellow: 0.9, rainbow: 0.7 }, // pause between attacks
+  r: 17, hits: 3, iframe: 0.9, returnSpeed: 95, jumpImpulse: 250, freeze: 5,
+  charge:   { clear: 55, red: 108, yellow: 82, rainbow: 122, volcano: 100 },   // charge speed per level boss
+  idleWait: { clear: 1.2, red: 0.9, yellow: 0.9, rainbow: 0.7, volcano: 0.7 }, // pause between attacks
 };
 
 // Difficulty modes (chosen on the title screen). Health is measured in hearts
-// (fractional). bossHits is indexed by level (1..4).
+// (fractional). bossHits is indexed by level; L5 volcano boss is a fixed 12 (2 lives).
 const MODES = {
-  easy:   { name: 'EASY',      hitDamage: 0,    knockOnHit: false, levelHeart: true,  spawners: 1, spawnMul: 1.0, pointPenalty: 0, bossHits: { 1: 3, 2: 3, 3: 3, 4: 3 }, musicRate: 1.0,  musicWave: null },
-  normal: { name: 'NORMAL',    hitDamage: 0.25, knockOnHit: true,  levelHeart: true,  spawners: 1, spawnMul: 1.2, pointPenalty: 0, bossHits: { 1: 3, 2: 4, 3: 5, 4: 6 }, musicRate: 1.14, musicWave: null },
-  rage:   { name: 'RAGE MODE', hitDamage: 0.5,  knockOnHit: true,  levelHeart: false, spawners: 2, spawnMul: 1.5, pointPenalty: 1, bossHits: { 1: 6, 2: 8, 3: 10, 4: 12 }, musicRate: 1.3, musicWave: 'sawtooth' },
+  easy:   { name: 'EASY',      hitDamage: 0,    knockOnHit: false, levelHeart: true,  spawners: 1, spawnMul: 1.0, pointPenalty: 0, bossHits: { 1: 3, 2: 3, 3: 3, 4: 3, 5: 12 }, musicRate: 1.0,  musicWave: null },
+  normal: { name: 'NORMAL',    hitDamage: 0.25, knockOnHit: true,  levelHeart: true,  spawners: 1, spawnMul: 1.2, pointPenalty: 0, bossHits: { 1: 3, 2: 4, 3: 5, 4: 6, 5: 12 }, musicRate: 1.14, musicWave: null },
+  rage:   { name: 'RAGE MODE', hitDamage: 0.5,  knockOnHit: true,  levelHeart: false, spawners: 2, spawnMul: 1.5, pointPenalty: 1, bossHits: { 1: 6, 2: 8, 3: 10, 4: 12, 5: 12 }, musicRate: 1.3, musicWave: 'sawtooth' },
 };
 
-const LEVEL_NAMES = { 1: 'THE SHALLOWS', 2: 'BROKEN GROUND', 3: 'THE GAPS', 4: 'INFERNO' };
+const LEVEL_NAMES = { 1: 'THE SHALLOWS', 2: 'BROKEN GROUND', 3: 'THE GAPS', 4: 'INFERNO', 5: 'THE VOLCANO' };
 
 // ── Aesthetic themes (purely visual; gameplay stays levels 1–4) ──
 // Each run randomly (seeded) assigns a sky + a world to each level.
@@ -552,6 +554,7 @@ function buildLevel() {
   const o = Game.themeOrder || { worlds: WORLD_KEYS, skies: SKY_KEYS };
   const i = (Game.level - 1);
   let world = o.worlds[i % o.worlds.length], sky = o.skies[i % o.skies.length];
+  if (Game.level === 5) { world = 'classic'; sky = 'thunder'; }   // the volcano finale is always stormy
   const q = new URLSearchParams(location.search).get('theme');
   if (q) { const [w, s] = q.split(','); if (WORLDS[w]) world = w; if (SKY_KEYS.includes(s)) sky = s; }
   Game.theme = { world, sky };
@@ -929,6 +932,8 @@ const Audio = {
       case 'buzzThanks':this.blip(n('C5'), .07, 'square', .3, t0); this.blip(n('E5'), .07, 'square', .3, t0 + .08); this.blip(n('G5'), .1, 'square', .3, t0 + .16); break;
       case 'buzzGrumpy':this.blip(n('E3'), .18, 'sawtooth', .4, t0); this.blip(n('C3'), .26, 'sawtooth', .4, t0 + .1); break;
       case 'lifeUp':    this.blip(n('C5'), .09, 'square', .4, t0); this.blip(n('E5'), .09, 'square', .4, t0 + .09); this.blip(n('G5'), .09, 'square', .4, t0 + .18); this.blip(n('C6'), .22, 'square', .42, t0 + .27); break;
+      // Boss scream: a descending detuned sawtooth screech (mid-pitched, not shrill).
+      case 'scream':    for (let i = 0; i < 5; i++) { const f = n('A4') * Math.pow(0.9, i); this.blip(f, .22, 'sawtooth', .4, t0 + i * .12); this.blip(f * 1.02, .22, 'sawtooth', .3, t0 + i * .12); } break;
       default:      this.blip(n('A4'), .06, 'square', .3, t0);
     }
   },
@@ -1007,7 +1012,7 @@ function closeShop() {
   Audio.sfx(m && m.bought ? 'buzzThanks' : 'buzzGrumpy');
 }
 function afterShop() {
-  if (Game.level >= 4) { Game.points = 0; Game.scene = 'VICTORY'; Game.sceneT = 0; Audio.stopMusic(); Audio.playMusic('victory'); return; }  // points reset after the final merchant
+  if (Game.level >= LAST_LEVEL) { Game.points = 0; Game.scene = 'VICTORY'; Game.sceneT = 0; Audio.stopMusic(); Audio.playMusic('victory'); return; }  // points reset after the final merchant
   Game.level++;
   gotoIntro();
 }
@@ -1229,7 +1234,8 @@ function activateBoss() {
     x: C.SPAWN_X, y: C.SPAWN_Y + 16, vx: 0, vy: 0, r: BOSS.r, type,
     hits: 0, maxHits, state: 'enter', stateT: 0, onGround: false,
     iframe: 0, alive: true, startX: C.PLAT_X1 - 34, gaze: -1, jumpT: 0.5,
-    feint: false, spikes: type === 'rainbow' ? 7 : 5,
+    feint: false, spikes: (type === 'rainbow' || type === 'volcano') ? 7 : 5,
+    lives: type === 'volcano' ? 2 : 1, enraged: false, canScream: type === 'volcano', screamT: 2.5,
   };
   Audio.sfx('bossSpawn'); Audio.playMusic('boss'); shake(6);
 }
@@ -1238,7 +1244,14 @@ function bossHit(b, n) {
   if (!b.alive || b.iframe > 0) return;
   b.hits += (n || 1); b.iframe = BOSS.iframe; b.vy = -130; b.state = 'return';
   Audio.sfx('bossHit'); spawnBurst(b.x, b.y - b.r, ENEMY_COL[b.type] || '#fff', 14); shake(4);
-  if (b.hits >= b.maxHits) { b.alive = false; Game.boss = null; spawnBurst(b.x, b.y - b.r, '#fff', 30); shake(9); onBossDefeated(); }
+  if (b.hits >= b.maxHits) {
+    if (b.lives > 1) {                       // revive: full 12 bars, faster, bloodshot
+      b.lives -= 1; b.hits = 0; b.maxHits = 12; b.enraged = true; b.iframe = 1.2; b.state = 'enter'; b.y = CONFIG.SPAWN_Y + 16;
+      spawnBurst(b.x, b.y, '#e0392f', 40); shake(12); Audio.sfx('scream');
+      return;
+    }
+    b.alive = false; Game.boss = null; spawnBurst(b.x, b.y - b.r, '#fff', 30); shake(9); onBossDefeated();
+  }
 }
 
 // Strong-hit floor blast: kill monsters within ~1 hero-width L/R; 2 boss-hits if in range.
@@ -1259,8 +1272,8 @@ function updateBoss(dt) {
   const C = CONFIG, ter = Game.terrain, h = Game.hero;
   if (b.iframe > 0) b.iframe = Math.max(0, b.iframe - dt);
   b.gaze = h.x < b.x ? -1 : 1;
-  const phase2 = b.hits >= Math.ceil(b.maxHits * 2 / 3);   // enraged in the last third of its health
-  const spd = (BOSS.charge[b.type] || 60) * (phase2 ? 1.28 : 1);
+  const phase2 = b.enraged || b.hits >= Math.ceil(b.maxHits * 2 / 3);   // enraged in the last third (or revived)
+  const spd = (BOSS.charge[b.type] || 60) * (b.enraged ? 1.5 : phase2 ? 1.28 : 1);   // revived volcano boss is 1.5x
 
   // gravity + floor: the boss FOLLOWS the platform surface (walks up/down hills
   // and mini-platforms) but bridges holes at the base line — so it never falls
@@ -1279,13 +1292,19 @@ function updateBoss(dt) {
     case 'idle':
       if (ease(b.startX, BOSS.returnSpeed)) {
         b.stateT -= dt;
+        if (b.canScream) { b.screamT -= dt; }
         if (b.stateT <= 0) {
-          if (b.type === 'rainbow') { b.state = 'telegraph'; b.stateT = 0.6; b.feint = Game.rand() < 0.5; }
+          if (b.canScream && b.screamT <= 0) { b.state = 'scream'; b.stateT = 0.8; b.screamT = 4 + Game.rand() * 3; Audio.sfx('scream'); if (h.ghost <= 0 && h.dodgeT <= 0 && !h.dead) h.frozen = BOSS.freeze; }
+          else if (b.type === 'rainbow' || b.type === 'volcano') { b.state = 'telegraph'; b.stateT = 0.6; b.feint = Game.rand() < 0.5; }
           else { b.state = 'charge'; b.jumpT = 0.4; }
         }
       }
       break;
-    case 'telegraph':                         // L4 rainbow wind-up (may be a feint)
+    case 'scream':                            // rears back and screams (freeze already applied)
+      b.stateT -= dt;
+      if (b.stateT <= 0) { b.state = 'charge'; b.jumpT = 0.35; }
+      break;
+    case 'telegraph':                         // L4/L5 wind-up (may be a feint)
       b.stateT -= dt;
       if (b.stateT <= 0) { if (b.feint) { b.state = 'feint'; b.stateT = 0.22; } else { b.state = 'charge'; b.jumpT = 0.4; } }
       break;
@@ -1295,7 +1314,7 @@ function updateBoss(dt) {
       break;
     case 'charge':
       b.x -= spd * dt;
-      if (b.type === 'yellow' || (b.type === 'rainbow' && phase2)) {   // L3 (and rainbow p2) jump while charging
+      if (b.type === 'yellow' || b.type === 'volcano' || (b.type === 'rainbow' && phase2)) {   // yellow/volcano (& rainbow p2) jump while charging
         if (b.onGround) { b.jumpT -= dt; if (b.jumpT <= 0) { b.vy = -BOSS.jumpImpulse; b.onGround = false; b.jumpT = 0.6; } }
       }
       if (b.x <= C.PLAT_X0 + b.r) b.state = 'return';
@@ -1338,9 +1357,11 @@ function update(dt) {
   if (h.shieldT > 0) h.shieldT = Math.max(0, h.shieldT - dt);
   if (h.shieldCd > 0) h.shieldCd = Math.max(0, h.shieldCd - dt);
   if (h.dodgeCd > 0) h.dodgeCd = Math.max(0, h.dodgeCd - dt);
+  if (h.frozen > 0) h.frozen = Math.max(0, h.frozen - dt);
   h.coyote = h.onGround ? C.COYOTE : Math.max(0, h.coyote - dt);
   h.jumpBuf = Input.consumeJump() ? C.JUMP_BUFFER : Math.max(0, h.jumpBuf - dt);
   const downPressed = Input.consumeDown();
+  const frozen = h.frozen > 0;   // scream-frozen: can't act (but still vulnerable)
 
   // ── Dodge (hold LEFT+RIGHT): spin untouchable in place, cannot fall.
   //    Lasts as long as both are held, up to DODGE_TIME (5s), then cooldown. ──
@@ -1354,18 +1375,19 @@ function update(dt) {
     updateBoss(dt);
     return;
   }
-  if (Game.owned.dodge && Input.left && Input.right && h.dodgeCd <= 0) {
+  if (Game.owned.dodge && !frozen && Input.left && Input.right && h.dodgeCd <= 0) {
     h.dodgeT = C.DODGE_TIME; Audio.sfx('jump'); shake(2); return;
   }
 
   // ── DOWN: in the air = Strong Hit dive; on the ground = arm the shield ──
-  if (downPressed) {
+  if (downPressed && !frozen) {
     if (!h.onGround && Game.owned.strongHit && !h.strong) { h.strong = true; h.vy = C.STRONG_HIT_V; Audio.sfx('jump'); }
     else if (h.onGround && Game.owned.shield && h.shieldCd <= 0) { h.shieldT = C.SHIELD_ACTIVE; h.shieldCd = C.SHIELD_CD; Audio.sfx('buzz'); }
   }
 
-  // horizontal control (suppressed briefly during knockback)
-  if (h.knock <= 0) {
+  // horizontal control (suppressed during knockback / scream-freeze)
+  if (frozen) { h.vx = 0; }
+  else if (h.knock <= 0) {
     const dir = (Input.right ? 1 : 0) - (Input.left ? 1 : 0);
     const target = dir * C.RUN_SPEED;
     const rate = (h.onGround ? (dir ? C.GROUND_ACCEL : C.GROUND_FRICTION) : C.AIR_ACCEL) * dt;
@@ -1374,6 +1396,7 @@ function update(dt) {
   }
 
   // jump (ground/coyote) + optional mid-air double jump
+  if (frozen) h.jumpBuf = 0;
   if (h.jumpBuf > 0 && (h.onGround || h.coyote > 0)) {
     h.vy = -C.JUMP_V; h.onGround = false; h.coyote = 0; h.jumpBuf = 0; h.jumping = true;
     h.airJumps = Game.owned.doubleJump ? 1 : 0;   // grant an air jump on takeoff
@@ -1643,7 +1666,8 @@ function heroColor(h) {
 
 function drawHero() {
   const h = Game.hero, C = CONFIG;
-  const x = Math.round(h.x - h.w / 2), y = Math.round(h.y - h.h);
+  const tremble = h.frozen > 0 ? Math.round((Math.random() * 2 - 1) * 1.5) : 0;   // scream-freeze shiver
+  const x = Math.round(h.x - h.w / 2) + tremble, y = Math.round(h.y - h.h);
   let alpha = 1;
   if (h.ghost > 0) alpha = 0.35 + 0.3 * (0.5 + 0.5 * Math.sin(Game.t * 34));   // ghostly respawn
   else if (h.hurt > 0 && ((Game.t * 20) | 0) & 1) alpha = 0.35;                // i-frame flicker
@@ -1696,7 +1720,7 @@ function drawHero() {
   ctx.globalAlpha = 1;
 }
 
-const ENEMY_COL = { clear: '#dfe6e9', red: '#e0392f', yellow: '#f4d03f', rainbow: '#fff' };
+const ENEMY_COL = { clear: '#dfe6e9', red: '#e0392f', yellow: '#f4d03f', rainbow: '#fff', volcano: '#c1121f' };
 
 function drawDonut(cx, cy, r, type, spikes, gaze, alpha, phase) {
   const col = ENEMY_COL[type] || '#fff';
@@ -1734,9 +1758,10 @@ function drawEnemies() {
 function drawBoss() {
   const b = Game.boss; if (!b) return;
   const cx = b.x, cy = b.y - b.r, r = b.r;
-  const phase2 = b.hits >= Math.ceil(b.maxHits * 2 / 3);   // enraged in the last third of its health
+  const phase2 = b.enraged || b.hits >= Math.ceil(b.maxHits * 2 / 3);   // enraged in the last third (or revived)
   let col = ENEMY_COL[b.type] || '#fff';
   if (b.type === 'rainbow') col = `hsl(${(Game.t * 120) % 360} 90% 60%)`;
+  else if (b.type === 'volcano') col = b.enraged ? '#8a0f16' : '#c1121f';
   // hit flash
   const flash = b.iframe > 0 && ((Game.t * 24) | 0) & 1;
 
@@ -1744,6 +1769,10 @@ function drawBoss() {
   if (b.state === 'telegraph' || b.state === 'feint') {
     ctx.fillStyle = 'rgba(255,255,255,0.15)';
     ctx.beginPath(); ctx.arc(cx, cy, r + 5 + Math.sin(Game.t * 20) * 2, 0, Math.PI * 2); ctx.fill();
+  }
+  // scream: expanding shock rings
+  if (b.state === 'scream') {
+    for (let i = 0; i < 3; i++) { const rr = r + 6 + ((Game.t * 60 + i * 12) % 30); ctx.strokeStyle = `rgba(255,80,40,${0.5 - rr / 90})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.stroke(); }
   }
   ctx.save();
   if (flash) ctx.globalAlpha = 0.5;
@@ -1986,7 +2015,7 @@ requestAnimationFrame(tick);
 // ── Test hook: pure logic + deterministic stepping for Playwright ──
 window.BS = {
   version: '0.7.0-modes',
-  CONFIG, PALETTE, LEVELS, LEVEL_NAMES, MUSIC, MODES, WORLDS, WORLD_KEYS, SKY_KEYS,
+  CONFIG, PALETTE, LEVELS, LEVEL_NAMES, MUSIC, MODES, WORLDS, WORLD_KEYS, SKY_KEYS, LAST_LEVEL,
   theme: () => Game.theme,
   themeOrder: () => Game.themeOrder,
   setMode: (m) => { if (MODES[m]) Game.mode = m; },

@@ -66,19 +66,21 @@ test.describe('P6 · scene flow', () => {
     expect(r.scene).toBe('GAMEOVER');
   });
 
-  test('E2E: beating the level-4 boss ends in VICTORY', async ({ page }) => {
+  test('E2E: beating the final (level-5) boss ends in VICTORY', async ({ page }) => {
     await openGame(page);
     await page.evaluate(() => window.BS.freeze(true));
     const r = await page.evaluate(() => {
-      window.BS.start(); window.BS.setMode('normal'); const st = window.BS.state(); st.level = 4; window.BS.setLevel(4); st.hero.ghost = 1e9;
+      window.BS.start(); window.BS.setMode('normal'); const st = window.BS.state();
+      st.level = window.BS.LAST_LEVEL; window.BS.setLevel(window.BS.LAST_LEVEL); st.hero.ghost = 1e9;
       st.t = window.BS.CONFIG.LEVEL_TIME + 0.01; window.BS.stepFixed(1);
-      const need = window.BS.boss().maxHits;      // L4 Normal boss has 6 HP
-      for (let k = 0; k < need; k++) { window.BS.boss().iframe = 0; window.BS.bossHit(); }
+      // volcano boss has 2 lives; keep hitting through both.
+      let guard = 0;
+      while (window.BS.boss() && guard++ < 60) { window.BS.boss().iframe = 0; window.BS.bossHit(); }
       const clear = st.scene;              // CLEAR first
-      window.BS.tapAdvance();              // CLEAR → SHOP (merchant after L4 too)
+      window.BS.tapAdvance();              // CLEAR → SHOP
       const shop = st.scene;
       window.BS.closeShop();
-      for (let k = 0; k < 30 && st.scene === 'SHOP'; k++) window.BS.stepFixed(1);  // → VICTORY (past level 4)
+      for (let k = 0; k < 60 && st.scene === 'SHOP'; k++) window.BS.stepFixed(1);  // → VICTORY (past level 5)
       return { clear, shop, scene: st.scene };
     });
     expect(r.clear).toBe('CLEAR');
