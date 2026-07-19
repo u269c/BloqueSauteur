@@ -98,3 +98,38 @@ test.describe('P2 · surface sampling', () => {
     expect(r.offRight).toBeNull();
   });
 });
+
+test.describe('v1.4 · no pinhole gaps, spawn runways stay solid', () => {
+  const seeds = [1, 2, 7, 42, 99, 128, 777, 1000, 31337, 65535];
+
+  test('no hole is narrower than 2 tiles (single-tile pinholes removed)', async ({ page }) => {
+    await openGame(page);
+    const T = await page.evaluate(() => window.BS.CONFIG.TILE);
+    let sawAnyHole = false;
+    for (const level of [2, 3, 4, 5]) {
+      for (const seed of seeds) {
+        const a = await analyze(page, level, seed);
+        for (const h of a.holes) { sawAnyHole = true; expect(h.w, `L${level} s${seed} hole width`).toBeGreaterThanOrEqual(2 * T); }
+      }
+    }
+    expect(sawAnyHole).toBe(true);   // neg. control: we actually generated holes to check
+  });
+
+  test('the columns around each spawner are solid ground (monsters get runway)', async ({ page }) => {
+    await openGame(page);
+    for (const level of [2, 3, 4, 5]) {
+      for (const seed of seeds) {
+        const r = await page.evaluate(({ level, seed }) => {
+          const t = window.BS.genTerrain(level, seed), C = window.BS.CONFIG, T = C.TILE;
+          const solid = (x) => window.BS.surfaceAt(t, x) != null;
+          const out = { right: [], left: [] };
+          // 3-tile runway inward from each spawner's landing column
+          for (let k = 0; k <= 3; k++) { out.right.push(solid(C.SPAWN_X - k * T)); out.left.push(solid(C.SPAWN_X_L + k * T)); }
+          return out;
+        }, { level, seed });
+        expect(r.right, `L${level} s${seed} right runway`).not.toContain(false);
+        expect(r.left, `L${level} s${seed} left runway`).not.toContain(false);
+      }
+    }
+  });
+});
