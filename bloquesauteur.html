@@ -107,7 +107,7 @@
 
   /* Colour picker row with live hero preview */
   .picker-row { display:flex; align-items:center; gap:2.4vmin; }
-  #hero-preview { width:auto; height:min(14vmin,64px); image-rendering:pixelated; background:rgba(255,255,255,0.06); border:2px solid rgba(255,255,255,0.18); border-radius:8px; padding:2px; }
+  #hero-preview { width:auto; height:min(22vmin,104px); image-rendering:pixelated; background:rgba(255,255,255,0.06); border:2px solid rgba(255,255,255,0.18); border-radius:8px; padding:2px; }
 
   /* Save slots */
   .slots { display:flex; gap:2vmin; flex-wrap:wrap; justify-content:center; }
@@ -173,7 +173,7 @@
       <p class="mode-desc" id="mode-desc"></p>
       <div class="picker-label">Your colour</div>
       <div class="picker-row">
-        <canvas id="hero-preview" width="24" height="30" aria-label="hero preview"></canvas>
+        <canvas id="hero-preview" width="48" height="60" aria-label="hero preview"></canvas>
         <div class="swatches" id="swatches"></div>
       </div>
       <button class="play-btn" id="play-btn">▶ PLAY</button>
@@ -421,12 +421,15 @@ function surfaceAt(terrain, x) {
   return terrain.cols[Math.floor((x - terrain.x0) / terrain.colW)];
 }
 // A solid x near the centre, for hero spawn / respawn.
+// Safest spawn: centre of the widest solid segment (far from holes/edges).
 function findSafeX(terrain) {
-  const mid = (terrain.x0 + terrain.x1) / 2;
-  for (let d = 0; d < (terrain.x1 - terrain.x0); d += terrain.colW) {
-    for (const x of [mid + d, mid - d]) { if (surfaceAt(terrain, x) != null) return Math.round(x); }
+  const segs = terrain.segments;
+  if (segs && segs.length) {
+    let best = segs[0];
+    for (const s of segs) if ((s.x1 - s.x0) > (best.x1 - best.x0)) best = s;
+    return Math.round((best.x0 + best.x1) / 2);
   }
-  return Math.round(mid);
+  return Math.round((terrain.x0 + terrain.x1) / 2);
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -716,14 +719,20 @@ function showTitlePanel() { if (Save.data.activeSlot != null) { buildSwatches();
 function drawHeroPreview() {
   const cv = document.getElementById('hero-preview'); if (!cv) return;
   const c = cv.getContext('2d'); c.clearRect(0, 0, cv.width, cv.height);
+  c.save(); c.scale(2, 2);                       // 2x so the sprite (and costume) reads clearly
   const p = PALETTE[Game.hero.colorIdx];
   const col = (p && p.rainbow) ? 'hsl(200 90% 62%)' : (p && p.css) || '#39a0ed';
   const x = 6, y = 5, w = 12, h = 16;
   c.fillStyle = '#0a0a0a'; c.fillRect(x + 1, y + h - 2, 3, 4); c.fillRect(x + w - 4, y + h - 2, 3, 4);
   c.fillRect(x, y, w, h - 2);
-  c.fillStyle = col; c.fillRect(x + 2, y + 2, w - 4, 3); c.fillRect(x + (w >> 1) - 1, y + 2, 3, h - 8);
+  if (Game.owned && Game.owned.costume) {          // striped suit if owned
+    for (let sx = 2; sx < w - 2; sx += 3) { c.fillStyle = ((sx >> 1) & 1) ? col : '#eee8d5'; c.fillRect(x + sx, y + 2, 2, h - 6); }
+  } else {
+    c.fillStyle = col; c.fillRect(x + 2, y + 2, w - 4, 3); c.fillRect(x + (w >> 1) - 1, y + 2, 3, h - 8);
+  }
   c.fillStyle = 'rgba(255,255,255,0.22)'; c.fillRect(x + 2, y + 2, w - 4, 1);
   c.fillStyle = '#fff'; c.fillRect(x + w - 4, y + 6, 2, 2);
+  c.restore();
 }
 
 // ── Merchant shop UI ──
@@ -822,6 +831,7 @@ const Audio = {
     this.music.key = key; this.music.playing = true;
     this.music.rate = gameplay ? (m.musicRate || 1) : 1;
     this.music.wave = gameplay ? m.musicWave : null;
+    this.applyGain();                    // restore volume (pause/quit could have left it at 0)
     this._loop(track, this.ctx.currentTime + 0.06);
   },
   _loop(track, t0) {
@@ -1803,6 +1813,7 @@ window.BS = {
   audioState: () => (Audio.ctx ? Audio.ctx.state : 'none'),
   musicKey: () => Audio.music.key,
   musicRate: () => Audio.music.rate,
+  masterGain: () => (Audio.master ? Audio.master.gain.value : null),
   muted: () => Audio.muted,
   Save,
   // Flow controls
