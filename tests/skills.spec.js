@@ -80,7 +80,7 @@ test.describe('PR5 · bought hearts raise the max (this game)', () => {
     const r = await page.evaluate(() => {
       window.BS.Save.select(0); window.BS.startGame();
       const st = window.BS.state(), base = window.BS.CONFIG.LIVES_START;
-      st.points = 100; window.BS.buyItem('twoHearts');   // +2 max
+      st.points = 150; window.BS.buyItem('twoHearts');   // +2 max
       const maxAfter = base + st.heartsBought;
       window.BS.startGame();                    // new game → hearts reset
       return { maxAfter, base, heartsNext: st.heartsBought, ownedTwoNext: st.owned.twoHearts };

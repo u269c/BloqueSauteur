@@ -246,6 +246,7 @@ const CONFIG = {
   HURT_IFRAMES: 1.0, KNOCKBACK: 155, KNOCK_LOCK: 0.18,
   // Skills (from the shop)
   SHIELD_ACTIVE: 1.3, SHIELD_CD: 10, DODGE_TIME: 5, DODGE_CD: 3,
+  STRONG_HIT_V: 560, STRONG_BLAST_W: 22,   // strong-hit dive speed + floor-blast half-width
   // Terrain contract: generator guarantees holes ≤ MAX_JUMP_GAP and vertical
   // steps ≤ JUMP_MAX_H; hero physics (P3) must be able to clear both.
   MAX_JUMP_GAP: 48,                  // 3 tiles — widest hole the hero can clear
@@ -323,15 +324,17 @@ function shuffled(arr, rng) {
 // ── Merchant shop: 6 items (2×3), each purchasable once per slot. ──
 // persistent items (kept per slot across games) vs per-run consumables (hearts).
 const SHOP_ITEMS = [
-  { key: 'shield',     name: 'Spiked Shield', price: 100, blurb: 'DOWN arms a shield; kills the next attacker (10s cooldown)' },
+  { key: 'shield',     name: 'Spiked Shield', price: 100, blurb: 'DOWN (on the ground) arms a shield; kills the next attacker (10s cooldown)' },
   { key: 'doubleJump', name: 'Double Jump',   price: 125, blurb: 'Jump again in mid-air' },
   { key: 'dodge',      name: 'Dodge',         price: 125, blurb: 'LEFT+RIGHT: spin untouchable (hold up to 5s)' },
-  { key: 'heart',      name: 'A Heart',       price: 30,  blurb: '+1 max heart (this game)' },
-  { key: 'twoHearts',  name: 'Two Hearts',    price: 50,  blurb: '+2 max hearts (this game)' },
+  { key: 'strongHit',  name: 'Strong Hit',    price: 130, blurb: 'DOWN in the air = a hard dive: double boss damage, and a floor blast that clears nearby monsters' },
+  { key: 'halfHeart',  name: 'Half Heart',    price: 40,  blurb: '+½ max heart (this game)' },
+  { key: 'heart',      name: 'A Heart',       price: 75,  blurb: '+1 max heart (this game)' },
+  { key: 'twoHearts',  name: 'Two Hearts',    price: 110, blurb: '+2 max hearts (this game)' },
   { key: 'costume',    name: 'Striped Suit',  price: 150, blurb: 'A dapper striped costume' },
 ];
 // Which owned flags persist between games (purchases) vs reset each game (hearts).
-const PERSISTENT_ITEMS = ['shield', 'doubleJump', 'dodge', 'costume'];
+const PERSISTENT_ITEMS = ['shield', 'doubleJump', 'dodge', 'strongHit', 'costume'];
 const MERCHANT = { landY: CONFIG.PLAT_Y, descendV: 42, riseV: 260, hoverAmp: 22 };
 
 // Chiptune loops + jingles (TRACKS format from the reference engine: [note, beats]).
@@ -459,7 +462,7 @@ const Game = {
   bossActive: false,            // regular spawns pause during the boss
   merchant: null,               // active during the SHOP scene
   points: 0,
-  owned: { shield: false, doubleJump: false, dodge: false, heart: false, twoHearts: false, costume: false },   // from the active slot
+  owned: { shield: false, doubleJump: false, dodge: false, strongHit: false, heart: false, twoHearts: false, halfHeart: false, costume: false },   // from the active slot
   heartsBought: 0,      // hearts bought this game (per-run)
   levelHearts: 0,       // hearts earned by clearing levels (Easy/Normal, per-run)
   heartAnim: null,      // {t, dur} — heart-insert HUD animation
@@ -480,6 +483,7 @@ const Game = {
     airJumps: 0,    // remaining mid-air jumps (double-jump skill)
     shieldT: 0, shieldCd: 0,   // spiked-shield active window / cooldown
     dodgeT: 0, dodgeCd: 0,     // dodge untouchable window / cooldown
+    strong: false, frozen: 0,  // strong-hit dive in progress / scream-freeze timer
   },
   fps: 0,
 };
@@ -489,7 +493,7 @@ const Game = {
 // (not persisted). Muted is global. SAVE_VERSION bump wipes old saves.
 const SAVE_VERSION = 2;
 function freshSlot() {
-  return { owned: { shield: false, doubleJump: false, dodge: false, costume: false }, rainbowUnlocked: false, colorIdx: 0, mode: 'normal', best: 0 };
+  return { owned: { shield: false, doubleJump: false, dodge: false, strongHit: false, costume: false }, rainbowUnlocked: false, colorIdx: 0, mode: 'normal', best: 0 };
 }
 const Save = {
   KEY: 'bloquesauteur.save',
@@ -508,7 +512,7 @@ const Save = {
     if (!this.data.slots[i]) this.data.slots[i] = freshSlot();
     this.data.activeSlot = i;
     const s = this.data.slots[i];
-    Game.owned = { shield: false, doubleJump: false, dodge: false, heart: false, twoHearts: false, costume: false };
+    Game.owned = { shield: false, doubleJump: false, dodge: false, strongHit: false, heart: false, twoHearts: false, halfHeart: false, costume: false };
     for (const k of PERSISTENT_ITEMS) Game.owned[k] = !!(s.owned && s.owned[k]);
     Game.points = 0; Game.heartsBought = 0;          // per-game — start fresh
     Game.rainbowUnlocked = !!s.rainbowUnlocked;
@@ -558,14 +562,14 @@ function buildLevel() {
   Object.assign(Game.hero, {
     x: sx, y: surfaceAt(Game.terrain, sx) ?? CONFIG.PLAT_Y, vx: 0, vy: 0,
     onGround: true, coyote: 0, jumpBuf: 0, jumping: false, hurt: 0, knock: 0, ghost: 0, dead: false,
-    airJumps: 0, shieldT: 0, shieldCd: 0, dodgeT: 0, dodgeCd: 0,
+    airJumps: 0, shieldT: 0, shieldCd: 0, dodgeT: 0, dodgeCd: 0, strong: false, frozen: 0,
   });
 }
 function respawnHero() {
   const t = Game.terrain, sx = findSafeX(t);
   Object.assign(Game.hero, {
     x: sx, y: surfaceAt(t, sx) ?? CONFIG.PLAT_Y, vx: 0, vy: 0,
-    onGround: true, coyote: 0, jumpBuf: 0, jumping: false, hurt: 0, knock: 0, dead: false,
+    onGround: true, coyote: 0, jumpBuf: 0, jumping: false, hurt: 0, knock: 0, dead: false, strong: false, frozen: 0,
     ghost: CONFIG.RESPAWN_GHOST,        // 2s ghostly invincibility — enemies pass through
   });
 }
@@ -773,7 +777,15 @@ function drawShopIcon(c, key) {
       c.fillStyle = '#b58ce0'; c.beginPath(); c.moveTo(24, 10); c.lineTo(27, 15); c.lineTo(21, 15); c.closePath(); c.fill();
       c.fillStyle = '#2a2320'; c.fillRect(12, 12, 8, 3);   // ninja mask band
       break;
+    case 'strongHit':   // hero + big down arrow + impact spikes
+      c.fillStyle = '#e8912a'; c.beginPath(); c.moveTo(16, 26); c.lineTo(9, 15); c.lineTo(13, 15); c.lineTo(13, 5); c.lineTo(19, 5); c.lineTo(19, 15); c.lineTo(23, 15); c.closePath(); c.fill();
+      c.strokeStyle = '#ffca6b'; c.lineWidth = 2; c.beginPath(); c.moveTo(4, 28); c.lineTo(8, 24); c.moveTo(28, 28); c.lineTo(24, 24); c.moveTo(16, 30); c.lineTo(16, 27); c.stroke();
+      break;
     case 'heart': heart(16, 15, 2, '#e0392f'); break;
+    case 'halfHeart':   // heart with the right half greyed
+      heart(16, 15, 2, '#e0392f');
+      c.save(); c.beginPath(); c.rect(16, 6, 12, 20); c.clip(); heart(16, 15, 2, 'rgba(255,255,255,0.22)'); c.restore();
+      break;
     case 'twoHearts': heart(11, 13, 1.6, '#e0392f'); heart(21, 18, 1.6, '#e0392f'); break;
     case 'costume':
       c.fillStyle = '#3a3f48'; c.fillRect(8, 8, 16, 18);
@@ -786,6 +798,7 @@ function buyItem(key) {
   const item = SHOP_ITEMS.find((i) => i.key === key); if (!item) return;
   if (Game.owned[key] || Game.points < item.price) return;
   Game.points -= item.price; Game.owned[key] = true;
+  if (key === 'halfHeart') { Game.heartsBought += 0.5; Game.hp = maxHearts(); }
   if (key === 'heart') { Game.heartsBought += 1; Game.hp = maxHearts(); }
   if (key === 'twoHearts') { Game.heartsBought += 2; Game.hp = maxHearts(); }
   if (Game.merchant) Game.merchant.bought = true;
@@ -931,7 +944,7 @@ function startGame() {                         // TITLE → level 1 (points/hear
   // Safety: ensure a slot is active without clobbering current Game choices (mode/colour).
   if (Save.data.activeSlot == null) { Save.data.activeSlot = 0; if (!Save.data.slots[0]) Save.data.slots[0] = freshSlot(); Save.save(); }
   // Per-game reset: points to 0, hearts re-buyable, bought/earned hearts cleared.
-  Game.points = 0; Game.heartsBought = 0; Game.levelHearts = 0; Game.owned.heart = false; Game.owned.twoHearts = false; Game.heartAnim = null;
+  Game.points = 0; Game.heartsBought = 0; Game.levelHearts = 0; Game.owned.heart = false; Game.owned.twoHearts = false; Game.owned.halfHeart = false; Game.heartAnim = null;
   Game.level = 1; Game.hp = maxHearts();
   reseed(pickSeed());
   hideOverlay('start');
@@ -1037,6 +1050,11 @@ function spawnBurst(x, y, color, n) {
     Game.particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 40, life: 0.4 + Math.random() * 0.4, t: 0, color, r: 1 + (Math.random() * 2 | 0) });
   }
   if (Game.particles.length > 240) Game.particles.splice(0, Game.particles.length - 240);
+}
+// Award a monster kill: points + burst + sfx. Combo scaling is layered in (PR2).
+function addKill(x, y, color) {
+  Game.points += 1;
+  Audio.sfx('stomp'); spawnBurst(x, y, color, 12);
 }
 function updateParticles(dt) {
   if (Game.shakeT > 0) { Game.shakeT -= dt; if (Game.shakeT <= 0) Game.shakeMag = 0; }
@@ -1173,8 +1191,8 @@ function updateEnemies(dt) {
       const hl = h.x - h.w / 2, hr = h.x + h.w / 2, htop = h.y - h.h, hbot = h.y;
       if (hr > el && hl < er && hbot > etop && htop < ebot) {
         const stomp = h.vy > 0 && h.y < e.y - e.r;   // falling onto its top half
-        if (stomp) { e.alive = false; h.vy = -ENEMY.bounce; h.onGround = false; Game.points++; Audio.sfx('stomp'); spawnBurst(e.x, e.y - e.r, ENEMY_COL[e.type] || '#fff', 12); shake(3); }
-        else if (h.shieldT > 0) { e.alive = false; h.shieldT = 0; Game.points++; Audio.sfx('stomp'); spawnBurst(e.x, e.y - e.r, '#c9d0da', 16); shake(4); }  // spiked shield kills the attacker
+        if (stomp) { e.alive = false; h.vy = -ENEMY.bounce; h.onGround = false; addKill(e.x, e.y - e.r, ENEMY_COL[e.type] || '#fff'); shake(3); }
+        else if (h.shieldT > 0) { e.alive = false; h.shieldT = 0; addKill(e.x, e.y - e.r, '#c9d0da'); shake(4); }  // spiked shield kills the attacker
         else heroHurt(e.x > h.x);                     // hit → knock away from the enemy
       }
     }
@@ -1198,11 +1216,24 @@ function activateBoss() {
   Audio.sfx('bossSpawn'); Audio.playMusic('boss'); shake(6);
 }
 
-function bossHit(b) {
+function bossHit(b, n) {
   if (!b.alive || b.iframe > 0) return;
-  b.hits++; b.iframe = BOSS.iframe; b.vy = -130; b.state = 'return';
+  b.hits += (n || 1); b.iframe = BOSS.iframe; b.vy = -130; b.state = 'return';
   Audio.sfx('bossHit'); spawnBurst(b.x, b.y - b.r, ENEMY_COL[b.type] || '#fff', 14); shake(4);
   if (b.hits >= b.maxHits) { b.alive = false; Game.boss = null; spawnBurst(b.x, b.y - b.r, '#fff', 30); shake(9); onBossDefeated(); }
+}
+
+// Strong-hit floor blast: kill monsters within ~1 hero-width L/R; 2 boss-hits if in range.
+function strongHitBlast() {
+  const C = CONFIG, h = Game.hero, R = C.STRONG_BLAST_W;
+  spawnBurst(h.x, h.y - 2, '#ffca6b', 22); shake(6);
+  for (const e of Game.enemies) {
+    if (e.alive && Math.abs(e.x - h.x) <= R + e.r && Math.abs((e.y) - h.y) <= 24) {
+      e.alive = false; addKill(e.x, e.y - e.r, ENEMY_COL[e.type] || '#fff');
+    }
+  }
+  const b = Game.boss;
+  if (b && b.alive && Math.abs(b.x - h.x) <= R + b.r && b.iframe <= 0) bossHit(b, 2);
 }
 
 function updateBoss(dt) {
@@ -1262,7 +1293,7 @@ function updateBoss(dt) {
     const hl = h.x - h.w / 2, hr = h.x + h.w / 2, htop = h.y - h.h, hbot = h.y;
     if (hr > bl && hl < br && hbot > btop && htop < bbot) {
       const stomp = h.vy > 0 && h.y < b.y - b.r;
-      if (stomp) { bossHit(b); Game.hero.vy = -ENEMY.bounce; Game.hero.onGround = false; }
+      if (stomp) { bossHit(b, h.strong ? 2 : 1); Game.hero.vy = -ENEMY.bounce; Game.hero.onGround = false; h.strong = false; }
       else if (h.shieldT > 0) { h.shieldT = 0; bossHit(b); }   // shield damages the boss instead of hurting you
       else heroHurt(b.x > h.x);
     }
@@ -1309,9 +1340,10 @@ function update(dt) {
     h.dodgeT = C.DODGE_TIME; Audio.sfx('jump'); shake(2); return;
   }
 
-  // ── Spiked shield (DOWN): arm a front shield, 10s cooldown ──
-  if (downPressed && Game.owned.shield && h.shieldCd <= 0) {
-    h.shieldT = C.SHIELD_ACTIVE; h.shieldCd = C.SHIELD_CD; Audio.sfx('buzz');
+  // ── DOWN: in the air = Strong Hit dive; on the ground = arm the shield ──
+  if (downPressed) {
+    if (!h.onGround && Game.owned.strongHit && !h.strong) { h.strong = true; h.vy = C.STRONG_HIT_V; Audio.sfx('jump'); }
+    else if (h.onGround && Game.owned.shield && h.shieldCd <= 0) { h.shieldT = C.SHIELD_ACTIVE; h.shieldCd = C.SHIELD_CD; Audio.sfx('buzz'); }
   }
 
   // horizontal control (suppressed briefly during knockback)
@@ -1340,7 +1372,10 @@ function update(dt) {
   else { g = C.G_FALL; h.jumping = false; }
   h.vy = Math.min(h.vy + g * dt, C.MAX_FALL);
 
+  const wasAir = !h.onGround;
   collideHero(h, dt);
+  // Strong-hit floor blast: landing a dive clears nearby monsters (and blasts the boss).
+  if (h.strong && h.onGround && wasAir) { strongHitBlast(); h.strong = false; }
 
   // lava death — fell into a hole or off an edge and reached the lava surface
   if (h.y >= C.LAVA_Y) heroDie();
@@ -1657,7 +1692,7 @@ function drawHUD() {
   const C = CONFIG;
   ctx.textBaseline = 'top'; ctx.font = '8px monospace';
   // health as (fractional) hearts; one slot per max heart, capped for display.
-  const slots = Math.min(9, Math.max(3, maxHearts()));
+  const slots = Math.min(9, Math.max(3, Math.ceil(maxHearts())));
   const a = Game.heartAnim, p = a ? Math.min(1, a.t / a.dur) : 1;   // new heart slides in from the left
   for (let i = 0; i < slots; i++) {
     let hx = 6 + i * 11;

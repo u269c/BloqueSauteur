@@ -24,7 +24,7 @@ test('merchant appears after the boss and opens the shop', async ({ page }) => {
   expect(await page.evaluate(() => window.BS.scene())).toBe('SHOP');
   expect(await page.evaluate(() => !!window.BS.merchant())).toBe(true);
   await expect(page.locator('#shop')).toBeVisible();
-  await expect(page.locator('#shop-grid .shop-item')).toHaveCount(6);   // 2x3 items
+  await expect(page.locator('#shop-grid .shop-item')).toHaveCount(8);   // 8 items
 });
 
 test('buying deducts points, marks owned, greys out, and persists', async ({ page }) => {
@@ -55,7 +55,7 @@ test('cannot afford → greyed and unbuyable (neg. control vs affordable)', asyn
 
 test('a heart purchase raises max hearts by one', async ({ page }) => {
   await openGame(page); await enterPlayPanel(page, 0);
-  await toShop(page, 40);
+  await toShop(page, 100);
   const r = await page.evaluate(() => {
     const before = window.BS.state().heartsBought;
     window.BS.buyItem('heart');
