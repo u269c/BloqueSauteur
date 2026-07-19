@@ -1517,24 +1517,122 @@ function drawHazard(worldKey) {
   }
 }
 
-function drawTerrain() {
-  const C = CONFIG, ter = Game.terrain;
-  if (!ter) return;
-  const segs = ter.segments, d = (WORLDS[Game.theme.world] || WORLDS.classic).deco;
-  // Holes are left open — the sky/horizon and the hazard band (drawn earlier in
-  // render()) show straight through the gap.
-  // Solid columns per segment.
-  for (const s of segs) {
-    const w = s.x1 - s.x0;
-    ctx.fillStyle = d.body; ctx.fillRect(s.x0, s.top, w, C.H - s.top);
-    // brick texture
-    ctx.fillStyle = d.brick;
-    for (let by = s.top + 6; by < C.H; by += 10) ctx.fillRect(s.x0, by, w, 1);
-    for (let bx = s.x0 + 8; bx < s.x1; bx += 16) ctx.fillRect(bx, s.top, 1, C.H - s.top);
-    // lit top edge + step face on the left flank of raised segments
-    ctx.fillStyle = d.edge; ctx.fillRect(s.x0, s.top, w, 4);
-    ctx.fillStyle = d.hi;   ctx.fillRect(s.x0, s.top, w, 1);
+// Fully-repainting backdrops for indoor worlds (drawn after the sky); others add
+// a far layer or nothing so the themed sky still shows.
+function drawWorldBackdrop(world) {
+  const C = CONFIG, W = C.W, H = C.H, t = Game.t;
+  if (world === 'climbing') {                 // indoor climbing gym wall + colourful holds
+    vgrad(0, H, '#6f6a62', '#4a463f');
+    for (let i = 0; i < 46; i++) {
+      const x = (hash(i) * W) | 0, y = (hash(i + 51) * (H - 20) + 6) | 0;
+      const cols = ['#e0392f', '#f4d03f', '#39a0ed', '#7cb342', '#e0348b', '#e8912a'];
+      ctx.fillStyle = cols[i % cols.length]; ctx.beginPath(); ctx.arc(x, y, 2.5, 0, 7); ctx.fill();
+    }
+    ctx.strokeStyle = 'rgba(0,0,0,0.15)'; ctx.lineWidth = 1;
+    for (let y = 24; y < H; y += 24) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+  } else if (world === 'mansion') {            // dollhouse: wallpapered back wall + a picture + window
+    vgrad(0, H, '#6b4a3a', '#513526');
+    ctx.fillStyle = 'rgba(255,220,180,0.06)'; for (let x = 6; x < W; x += 14) ctx.fillRect(x, 0, 5, H);   // wallpaper stripes
+    ctx.fillStyle = '#3a2a1e'; ctx.fillRect(W * 0.16, 30, 34, 26); ctx.fillStyle = '#caa96b'; ctx.fillRect(W * 0.16 + 3, 33, 28, 20);   // framed picture
+    ctx.fillStyle = '#2a2f3a'; ctx.fillRect(W * 0.66, 26, 44, 40); ctx.fillStyle = '#6f8cae'; ctx.fillRect(W * 0.66 + 3, 29, 38, 34);   // window
+    ctx.fillStyle = '#3a2a1e'; ctx.fillRect(W * 0.66 + 20, 26, 4, 40); ctx.fillRect(W * 0.66, 44, 44, 4);
+  } else if (world === 'rooftops') {           // distant skyline near the horizon
+    for (let i = 0; i < 14; i++) {
+      const bx = i * 38 - 10, bh = 40 + (hash(i) * 60 | 0), by = C.PLAT_Y - bh + 30;
+      ctx.fillStyle = i % 2 ? '#2c3340' : '#333b49'; ctx.fillRect(bx, by, 34, bh);
+      ctx.fillStyle = 'rgba(240,220,120,0.25)'; for (let wy = by + 6; wy < by + bh - 4; wy += 8) for (let wx = bx + 4; wx < bx + 30; wx += 8) if (((wx + wy) & 3) === 0) ctx.fillRect(wx, wy, 3, 3);
+    }
   }
+}
+
+// ── Per-world platform renderers (collision surface = ter.segments, unchanged) ──
+function segDefault(s, d) {                    // brick column (bathtub + fallback)
+  const C = CONFIG, w = s.x1 - s.x0;
+  ctx.fillStyle = d.body; ctx.fillRect(s.x0, s.top, w, C.H - s.top);
+  ctx.fillStyle = d.brick;
+  for (let by = s.top + 6; by < C.H; by += 10) ctx.fillRect(s.x0, by, w, 1);
+  for (let bx = s.x0 + 8; bx < s.x1; bx += 16) ctx.fillRect(bx, s.top, 1, C.H - s.top);
+  ctx.fillStyle = d.edge; ctx.fillRect(s.x0, s.top, w, 4);
+  ctx.fillStyle = d.hi; ctx.fillRect(s.x0, s.top, w, 1);
+}
+function segVolcano(s) {                        // craggy basalt rock with molten seams
+  const C = CONFIG, w = s.x1 - s.x0, y = s.top;
+  ctx.fillStyle = '#241c1a'; ctx.fillRect(s.x0, y, w, C.H - y);
+  ctx.fillStyle = '#332722'; for (let bx = s.x0 + 4; bx < s.x1; bx += 9) ctx.fillRect(bx, y + 3, 3, C.H - y);
+  ctx.fillStyle = 'rgba(255,90,0,0.55)'; for (let bx = s.x0 + 2; bx < s.x1; bx += 13) ctx.fillRect(bx, y + 6 + (hash(bx) * 10 | 0), 2, 8 + (hash(bx + 1) * 12 | 0));
+  ctx.fillStyle = '#5a4a3e'; ctx.fillRect(s.x0, y, w, 3);
+  ctx.fillStyle = '#7a685a'; ctx.fillRect(s.x0, y, w, 1);
+  ctx.fillStyle = 'rgba(255,140,40,0.6)'; ctx.fillRect(s.x0, C.H - 3, w, 3);   // lava-lit underside
+}
+function segRooftops(s) {                       // concrete building facade with lit windows
+  const C = CONFIG, w = s.x1 - s.x0, y = s.top;
+  ctx.fillStyle = '#4a4e57'; ctx.fillRect(s.x0, y, w, C.H - y);
+  ctx.fillStyle = '#33373f'; ctx.fillRect(s.x0, y + 5, w, C.H - y);
+  for (let wy = y + 9; wy < C.H; wy += 11) for (let wx = s.x0 + 4; wx < s.x1 - 3; wx += 9) { ctx.fillStyle = (hash(wx * 7 + wy) > 0.45) ? '#ffe08a' : '#20242c'; ctx.fillRect(wx, wy, 5, 6); }
+  ctx.fillStyle = '#6d727d'; ctx.fillRect(s.x0, y, w, 5);   // parapet roof
+  ctx.fillStyle = '#8b909b'; ctx.fillRect(s.x0, y, w, 1);
+}
+function segPoison(s) {                          // dark smudgy clay + green turf tufts
+  const C = CONFIG, w = s.x1 - s.x0, y = s.top;
+  ctx.fillStyle = '#241f2a'; ctx.fillRect(s.x0, y, w, C.H - y);
+  ctx.fillStyle = 'rgba(60,40,70,0.6)'; for (let i = 0; i < w; i += 5) ctx.fillRect(s.x0 + i, y + 4 + (hash(s.x0 + i) * 14 | 0), 4, 3 + (hash(i) * 8 | 0));  // smudges
+  ctx.fillStyle = '#3a5a2e'; ctx.fillRect(s.x0, y, w, 4);   // mossy top
+  ctx.fillStyle = '#5f8a3a'; for (let tx = s.x0 + 2; tx < s.x1; tx += 7) { const th = 3 + (hash(tx) * 4 | 0); ctx.fillRect(tx, y - th, 2, th); ctx.fillRect(tx + 3, y - th + 1, 1, th); }   // turf blades
+}
+function segClimbing(s) {                        // bolted wooden plank ledge
+  const C = CONFIG, w = s.x1 - s.x0, y = s.top;
+  ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(s.x0, y + 6, w, C.H - y);   // shadow under the ledge on the wall
+  ctx.fillStyle = '#8a5a30'; ctx.fillRect(s.x0, y, w, 7);
+  ctx.fillStyle = '#b5843f'; ctx.fillRect(s.x0, y, w, 2);
+  ctx.fillStyle = '#5a3a1e'; for (let bx = s.x0 + 3; bx < s.x1; bx += 14) ctx.fillRect(bx, y + 2, 1, 4);   // plank seams
+  ctx.fillStyle = '#cfd6dd'; ctx.fillRect(s.x0 + 2, y + 2, 2, 2); ctx.fillRect(s.x1 - 4, y + 2, 2, 2);   // bolts
+}
+function segCorks(s) {                           // wine corks stood vertically, side by side
+  const C = CONFIG, y = s.top;
+  for (let cx = s.x0; cx < s.x1; cx += 8) {
+    const cw = Math.min(8, s.x1 - cx);
+    ctx.fillStyle = '#c8a06a'; ctx.fillRect(cx, y, cw, C.H - y);
+    ctx.fillStyle = '#a8804a'; ctx.fillRect(cx + cw - 1, y, 1, C.H - y);   // seam between corks
+    ctx.fillStyle = '#e0c090'; ctx.fillRect(cx, y, cw, 2);                 // lit top
+    ctx.fillStyle = 'rgba(120,90,50,0.5)'; for (let sy = y + 5; sy < C.H; sy += 6) ctx.fillRect(cx + 1, sy, cw - 2, 1);   // cork speckle lines
+  }
+}
+function segBridge(s) {                          // wooden rope bridge planks
+  const C = CONFIG, w = s.x1 - s.x0, y = s.top;
+  ctx.strokeStyle = '#6b4a2a'; ctx.lineWidth = 2;   // side ropes with a little sag
+  ctx.beginPath(); ctx.moveTo(s.x0, y - 6); ctx.quadraticCurveTo(s.x0 + w / 2, y - 1, s.x1, y - 6); ctx.stroke();
+  for (let px = s.x0 + 1; px < s.x1 - 2; px += 6) { ctx.fillStyle = (px & 8) ? '#7a5230' : '#8a5a30'; ctx.fillRect(px, y, 4, 8); ctx.strokeStyle = '#3a2414'; ctx.strokeRect(px + 0.5, y + 0.5, 4, 7); }
+  ctx.fillStyle = '#4a3018'; ctx.fillRect(s.x0 - 2, y - 8, 3, 16); ctx.fillRect(s.x1 - 1, y - 8, 3, 16);   // end posts
+}
+function segClouds(s) {                          // fluffy cloud platform (open air below)
+  const w = s.x1 - s.x0, y = s.top, cy = y + 5;
+  ctx.fillStyle = 'rgba(180,200,225,0.9)'; ctx.beginPath(); ctx.ellipse(s.x0 + w / 2, cy + 3, w / 2, 7, 0, 0, 7); ctx.fill();   // shaded underside
+  ctx.fillStyle = '#ffffff';
+  for (let bx = s.x0 + 4; bx <= s.x1 - 4; bx += 9) { const r = 5 + (hash(bx) * 4 | 0); ctx.beginPath(); ctx.arc(bx, cy, r, 0, 7); ctx.fill(); }
+  ctx.fillRect(s.x0 + 2, y + 1, w - 4, 5);
+}
+function segMansion(s) {                          // wooden floorboards + baseboard (holes = gaps)
+  const C = CONFIG, w = s.x1 - s.x0, y = s.top;
+  ctx.fillStyle = '#6b4a2e'; ctx.fillRect(s.x0, y, w, C.H - y);
+  ctx.fillStyle = '#7a5636'; ctx.fillRect(s.x0, y, w, 6);
+  ctx.fillStyle = '#5a3a20'; for (let bx = s.x0 + 6; bx < s.x1; bx += 18) ctx.fillRect(bx, y, 1, 6);   // board seams
+  ctx.fillStyle = '#3a2616'; ctx.fillRect(s.x0, y + 6, w, 2);                 // baseboard shadow
+  ctx.fillStyle = '#9a6a44'; ctx.fillRect(s.x0, y, w, 1);
+}
+function segBeach(s) {                            // sandy dune with grains + a shell
+  const C = CONFIG, w = s.x1 - s.x0, y = s.top;
+  ctx.fillStyle = '#e0c890'; ctx.fillRect(s.x0, y, w, C.H - y);
+  ctx.fillStyle = '#c8a868'; ctx.beginPath(); ctx.moveTo(s.x0, y + 4); ctx.quadraticCurveTo(s.x0 + w / 2, y - 2, s.x1, y + 4); ctx.lineTo(s.x1, y + 6); ctx.lineTo(s.x0, y + 6); ctx.fill();
+  ctx.fillStyle = '#fff0cc'; ctx.beginPath(); ctx.moveTo(s.x0, y + 3); ctx.quadraticCurveTo(s.x0 + w / 2, y - 3, s.x1, y + 3); ctx.lineTo(s.x1, y + 4); ctx.lineTo(s.x0, y + 4); ctx.fill();   // dune highlight
+  ctx.fillStyle = 'rgba(150,120,70,0.5)'; for (let gx = s.x0 + 3; gx < s.x1; gx += 6) ctx.fillRect(gx, y + 8 + (hash(gx) * 8 | 0), 1, 1);   // grains
+}
+const SEG_RENDER = { classic: segVolcano, rooftops: segRooftops, poison: segPoison, climbing: segClimbing, wineCorks: segCorks, ropeBridge: segBridge, skyClouds: segClouds, mansion: segMansion, beach: segBeach };
+
+function drawTerrain() {
+  const ter = Game.terrain; if (!ter) return;
+  const world = Game.theme.world, d = (WORLDS[world] || WORLDS.classic).deco, fn = SEG_RENDER[world];
+  // Holes (gaps between segments) stay open → sky/hazard shows through.
+  for (const s of ter.segments) { if (fn) fn(s, d); else segDefault(s, d); }
 }
 
 function heroColor(h) {
@@ -1795,8 +1893,9 @@ function render() {
     ctx.translate((Math.random() * 2 - 1) * m, (Math.random() * 2 - 1) * m);
   }
 
-  // Themed sky + hazard (both full-width, so open holes show them through)
+  // Themed sky → world backdrop → hazard → platforms (holes show sky/hazard through)
   drawSky(Game.theme.sky);
+  drawWorldBackdrop(Game.theme.world);
   drawHazard(Game.theme.world);
   drawTerrain();
 
