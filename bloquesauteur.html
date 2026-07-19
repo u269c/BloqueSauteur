@@ -1550,12 +1550,20 @@ function drawWorldBackdrop(world) {
     }
     ctx.strokeStyle = 'rgba(0,0,0,0.15)'; ctx.lineWidth = 1;
     for (let y = 24; y < H; y += 24) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
-  } else if (world === 'mansion') {            // dollhouse: wallpapered back wall + a picture + window
-    vgrad(0, H, '#6b4a3a', '#513526');
-    ctx.fillStyle = 'rgba(255,220,180,0.06)'; for (let x = 6; x < W; x += 14) ctx.fillRect(x, 0, 5, H);   // wallpaper stripes
-    ctx.fillStyle = '#3a2a1e'; ctx.fillRect(W * 0.16, 30, 34, 26); ctx.fillStyle = '#caa96b'; ctx.fillRect(W * 0.16 + 3, 33, 28, 20);   // framed picture
-    ctx.fillStyle = '#2a2f3a'; ctx.fillRect(W * 0.66, 26, 44, 40); ctx.fillStyle = '#6f8cae'; ctx.fillRect(W * 0.66 + 3, 29, 38, 34);   // window
-    ctx.fillStyle = '#3a2a1e'; ctx.fillRect(W * 0.66 + 20, 26, 4, 40); ctx.fillRect(W * 0.66, 44, 44, 4);
+  } else if (world === 'mansion') {            // a real DOLLHOUSE — sky shows left/right/above
+    const hx0 = C.PLAT_X0 - 12, hx1 = C.PLAT_X1 + 12, wallTop = 46, peak = 16;
+    // interior (wallpaper) — only inside the house, so the sky remains visible around it
+    ctx.fillStyle = '#5a3d2e'; ctx.fillRect(hx0, wallTop, hx1 - hx0, H - wallTop);
+    ctx.fillStyle = 'rgba(255,220,180,0.06)'; for (let x = hx0 + 6; x < hx1; x += 14) ctx.fillRect(x, wallTop, 5, H - wallTop);
+    // roof (peaked) sitting on the walls
+    ctx.fillStyle = '#7a2318'; ctx.beginPath(); ctx.moveTo(hx0 - 10, wallTop); ctx.lineTo((hx0 + hx1) / 2, peak); ctx.lineTo(hx1 + 10, wallTop); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#5a1810'; ctx.fillRect(hx0 - 10, wallTop - 3, hx1 - hx0 + 20, 4);
+    // side walls (exterior trim)
+    ctx.fillStyle = '#3a2618'; ctx.fillRect(hx0, wallTop, 5, H - wallTop); ctx.fillRect(hx1 - 5, wallTop, 5, H - wallTop);
+    // a framed picture + a window on the interior wall
+    ctx.fillStyle = '#3a2a1e'; ctx.fillRect(hx0 + 30, wallTop + 12, 34, 26); ctx.fillStyle = '#caa96b'; ctx.fillRect(hx0 + 33, wallTop + 15, 28, 20);
+    ctx.fillStyle = '#2a2f3a'; ctx.fillRect(hx1 - 74, wallTop + 10, 44, 40); ctx.fillStyle = '#6f8cae'; ctx.fillRect(hx1 - 71, wallTop + 13, 38, 34);
+    ctx.fillStyle = '#3a2a1e'; ctx.fillRect(hx1 - 54, wallTop + 10, 4, 40); ctx.fillRect(hx1 - 74, wallTop + 28, 44, 4);
   } else if (world === 'rooftops') {           // distant skyline near the horizon
     for (let i = 0; i < 14; i++) {
       const bx = i * 38 - 10, bh = 40 + (hash(i) * 60 | 0), by = C.PLAT_Y - bh + 30;
@@ -1617,8 +1625,14 @@ function segCorks(s) {                           // wine corks stood vertically,
     ctx.fillStyle = 'rgba(120,90,50,0.5)'; for (let sy = y + 5; sy < C.H; sy += 6) ctx.fillRect(cx + 1, sy, cw - 2, 1);   // cork speckle lines
   }
 }
-function segBridge(s) {                          // wooden rope bridge planks
-  const C = CONFIG, w = s.x1 - s.x0, y = s.top;
+function segBridge(s) {                          // wooden rope bridge planks on support trestles
+  const C = CONFIG, w = s.x1 - s.x0, y = s.top, wl = C.LAVA_Y + 4;   // trestles reach into the water
+  // support trestles (posts + cross-brace) holding the bridge up, at ~40px spacing
+  ctx.strokeStyle = '#3a2414'; ctx.lineWidth = 2;
+  for (let tx = s.x0 + 8; tx < s.x1 - 2; tx += 42) {
+    ctx.fillStyle = '#5a3a1e'; ctx.fillRect(tx, y + 8, 3, wl - (y + 8)); ctx.fillRect(tx + 14, y + 8, 3, wl - (y + 8));   // two posts
+    ctx.beginPath(); ctx.moveTo(tx + 1, y + 12); ctx.lineTo(tx + 16, wl - 6); ctx.moveTo(tx + 16, y + 12); ctx.lineTo(tx + 1, wl - 6); ctx.stroke();   // X brace
+  }
   ctx.strokeStyle = '#6b4a2a'; ctx.lineWidth = 2;   // side ropes with a little sag
   ctx.beginPath(); ctx.moveTo(s.x0, y - 6); ctx.quadraticCurveTo(s.x0 + w / 2, y - 1, s.x1, y - 6); ctx.stroke();
   for (let px = s.x0 + 1; px < s.x1 - 2; px += 6) { ctx.fillStyle = (px & 8) ? '#7a5230' : '#8a5a30'; ctx.fillRect(px, y, 4, 8); ctx.strokeStyle = '#3a2414'; ctx.strokeRect(px + 0.5, y + 0.5, 4, 7); }
