@@ -745,10 +745,10 @@ function drawHeroPreview() {
   const my = y + (h >> 1);                         // per-mode arms + knives
   if (Game.mode === 'normal' || Game.mode === 'rage') drawArmKnife(c, x + w, my, 1);
   if (Game.mode === 'rage') drawArmKnife(c, x, my + 2, -1);
-  c.fillStyle = 'rgba(255,255,255,0.85)';          // white outline
-  c.fillRect(x - 1, y - 1, w + 2, 1); c.fillRect(x - 1, y + h - 2, w + 2, 1);
-  c.fillRect(x - 1, y - 1, 1, h); c.fillRect(x + w, y - 1, 1, h);
   c.restore();
+  // thin white outline (drawn at native resolution so it doesn't scale up thick)
+  c.strokeStyle = 'rgba(255,255,255,0.85)'; c.lineWidth = 1.5;
+  c.strokeRect(x * 4 - 1, y * 4 - 1, w * 4 + 2, (h - 2) * 4 + 2);
 }
 
 // ── Merchant shop UI ──
