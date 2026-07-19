@@ -451,15 +451,24 @@ function genTerrain(level, seed) {
   const maxHoleCols = Math.max(1, Math.floor(C.MAX_JUMP_GAP / T));
   const rand = mulberry32(((seed >>> 0) ^ Math.imul(level | 0, 0x9E3779B1)) >>> 0);
   const h = new Array(nCols).fill(baseTop);               // null = hole
+  // Spawn runways: keep the columns next to each spawner solid so a fresh monster
+  // has room to get marching before it meets a hole (no instant fall on spawn).
+  const RUNWAY = 3;
+  const spawnColR = Math.floor((C.SPAWN_X - x0) / T);     // right box lands here, marches LEFT
+  const spawnColL = Math.floor((C.SPAWN_X_L - x0) / T);   // left box (RAGE) lands here, marches RIGHT
+  const inRunway = (i) => i >= spawnColR - RUNWAY || i <= spawnColL + RUNWAY;
 
+  // minW is clamped to 2: single-tile "pinhole" gaps are removed — monsters fell
+  // through them constantly and they read badly.
   function carveHoles(count, minW, maxW) {
     let placed = 0, tries = 0;
-    maxW = Math.min(maxW, maxHoleCols);
+    minW = Math.max(2, minW);
+    maxW = Math.min(Math.max(maxW, minW), maxHoleCols);
     while (placed < count && tries++ < 300) {
       const w = minW + Math.floor(rand() * (maxW - minW + 1));
       const start = EDGE + Math.floor(rand() * (nCols - 2 * EDGE - w));
-      let ok = true;                                       // need a solid buffer col on each side
-      for (let i = start - 1; i <= start + w; i++) { if (i < EDGE || i >= nCols - EDGE || h[i] === null) { ok = false; break; } }
+      let ok = true;                                       // need a solid buffer col on each side, clear of spawn runways
+      for (let i = start - 1; i <= start + w; i++) { if (i < EDGE || i >= nCols - EDGE || h[i] === null || inRunway(i)) { ok = false; break; } }
       if (!ok) continue;
       for (let i = start; i < start + w; i++) h[i] = null;
       placed++;
