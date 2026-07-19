@@ -245,7 +245,7 @@ const CONFIG = {
   COYOTE: 0.08, JUMP_BUFFER: 0.10,
   HURT_IFRAMES: 1.0, KNOCKBACK: 155, KNOCK_LOCK: 0.18,
   // Skills (from the shop)
-  SHIELD_ACTIVE: 1.3, SHIELD_CD: 10, DODGE_TIME: 1.15, DODGE_CD: 3,
+  SHIELD_ACTIVE: 1.3, SHIELD_CD: 10, DODGE_TIME: 5, DODGE_CD: 3,
   // Terrain contract: generator guarantees holes ≤ MAX_JUMP_GAP and vertical
   // steps ≤ JUMP_MAX_H; hero physics (P3) must be able to clear both.
   MAX_JUMP_GAP: 48,                  // 3 tiles — widest hole the hero can clear
@@ -287,9 +287,9 @@ const BOSS = {
 // Difficulty modes (chosen on the title screen). Health is measured in hearts
 // (fractional). bossHits is indexed by level (1..4).
 const MODES = {
-  easy:   { name: 'EASY',      hitDamage: 0,    knockOnHit: false, perfectBonus: true,  spawners: 1, pointPenalty: 0, bossHits: { 1: 3, 2: 3, 3: 3, 4: 3 }, musicRate: 1.0,  musicWave: null },
-  normal: { name: 'NORMAL',    hitDamage: 0.25, knockOnHit: true,  perfectBonus: true,  spawners: 1, pointPenalty: 0, bossHits: { 1: 3, 2: 4, 3: 5, 4: 6 }, musicRate: 1.14, musicWave: null },
-  rage:   { name: 'RAGE MODE', hitDamage: 0.5,  knockOnHit: true,  perfectBonus: false, spawners: 2, pointPenalty: 1, bossHits: { 1: 6, 2: 8, 3: 10, 4: 12 }, musicRate: 1.3, musicWave: 'sawtooth' },
+  easy:   { name: 'EASY',      hitDamage: 0,    knockOnHit: false, levelHeart: true,  spawners: 1, spawnMul: 1.0, pointPenalty: 0, bossHits: { 1: 3, 2: 3, 3: 3, 4: 3 }, musicRate: 1.0,  musicWave: null },
+  normal: { name: 'NORMAL',    hitDamage: 0.25, knockOnHit: true,  levelHeart: true,  spawners: 1, spawnMul: 1.2, pointPenalty: 0, bossHits: { 1: 3, 2: 4, 3: 5, 4: 6 }, musicRate: 1.14, musicWave: null },
+  rage:   { name: 'RAGE MODE', hitDamage: 0.5,  knockOnHit: true,  levelHeart: false, spawners: 2, spawnMul: 1.5, pointPenalty: 1, bossHits: { 1: 6, 2: 8, 3: 10, 4: 12 }, musicRate: 1.3, musicWave: 'sawtooth' },
 };
 
 const LEVEL_NAMES = { 1: 'THE SHALLOWS', 2: 'BROKEN GROUND', 3: 'THE GAPS', 4: 'INFERNO' };
@@ -460,7 +460,9 @@ const Game = {
   merchant: null,               // active during the SHOP scene
   points: 0,
   owned: { shield: false, doubleJump: false, dodge: false, heart: false, twoHearts: false, costume: false },   // from the active slot
-  heartsBought: 0,
+  heartsBought: 0,      // hearts bought this game (per-run)
+  levelHearts: 0,       // hearts earned by clearing levels (Easy/Normal, per-run)
+  heartAnim: null,      // {t, dur} — heart-insert HUD animation
   particles: [],
   shakeT: 0, shakeMag: 0,
   sceneT: 0,                     // time in the current transient scene (INTRO/CLEAR/…)
@@ -551,7 +553,7 @@ function buildLevel() {
   Game.enemies = [];
   Game.boss = null;
   Game.bossActive = false;
-  Game.spawnT = (LEVELS[Game.level] || LEVELS[1]).spawnEvery * 0.5;   // first wave comes a touch early
+  Game.spawnT = (LEVELS[Game.level] || LEVELS[1]).spawnEvery * 0.5 / (MODES[Game.mode].spawnMul || 1);   // first wave comes a touch early
   const sx = findSafeX(Game.terrain);
   Object.assign(Game.hero, {
     x: sx, y: surfaceAt(Game.terrain, sx) ?? CONFIG.PLAT_Y, vx: 0, vy: 0,
@@ -911,6 +913,7 @@ const Audio = {
       case 'buy':       this.blip(n('E5'), .06, 'square', .4, t0); this.blip(n('A5'), .1, 'square', .35, t0 + .06); break;
       case 'buzzThanks':this.blip(n('C5'), .07, 'square', .3, t0); this.blip(n('E5'), .07, 'square', .3, t0 + .08); this.blip(n('G5'), .1, 'square', .3, t0 + .16); break;
       case 'buzzGrumpy':this.blip(n('E3'), .18, 'sawtooth', .4, t0); this.blip(n('C3'), .26, 'sawtooth', .4, t0 + .1); break;
+      case 'lifeUp':    this.blip(n('C5'), .09, 'square', .4, t0); this.blip(n('E5'), .09, 'square', .4, t0 + .09); this.blip(n('G5'), .09, 'square', .4, t0 + .18); this.blip(n('C6'), .22, 'square', .42, t0 + .27); break;
       default:      this.blip(n('A4'), .06, 'square', .3, t0);
     }
   },
@@ -923,12 +926,12 @@ const Audio = {
 // Scenes: TITLE → INTRO → PLAY → (boss) → CLEAR → INTRO/… → VICTORY;  PLAY→GAMEOVER on 0 lives.
 function firstGesture() { Audio.ensure(); }   // unlock audio on the very first gesture
 
-function maxHearts() { return CONFIG.LIVES_START + (Game.heartsBought | 0); }
+function maxHearts() { return CONFIG.LIVES_START + (Game.heartsBought | 0) + (Game.levelHearts | 0); }
 function startGame() {                         // TITLE → level 1 (points/hearts reset per game)
   // Safety: ensure a slot is active without clobbering current Game choices (mode/colour).
   if (Save.data.activeSlot == null) { Save.data.activeSlot = 0; if (!Save.data.slots[0]) Save.data.slots[0] = freshSlot(); Save.save(); }
-  // Per-game reset: points to 0, hearts re-buyable, bought hearts cleared.
-  Game.points = 0; Game.heartsBought = 0; Game.owned.heart = false; Game.owned.twoHearts = false;
+  // Per-game reset: points to 0, hearts re-buyable, bought/earned hearts cleared.
+  Game.points = 0; Game.heartsBought = 0; Game.levelHearts = 0; Game.owned.heart = false; Game.owned.twoHearts = false; Game.heartAnim = null;
   Game.level = 1; Game.hp = maxHearts();
   reseed(pickSeed());
   hideOverlay('start');
@@ -955,8 +958,9 @@ function startPlay() {
 function onBossDefeated() {
   Game.bossActive = false;
   Game.points += 5;                             // bosses are worth 5 points
-  Game.gainedLife = !Game.hitThisLevel && MODES[Game.mode].perfectBonus;
-  if (Game.gainedLife) Game.hp += 1;            // no-hit-level bonus (may exceed 3; not in RAGE)
+  // Easy/Normal grant a heart after every boss (the gauge grows by one).
+  Game.gainedLife = !!MODES[Game.mode].levelHeart;
+  if (Game.gainedLife) { Game.levelHearts = (Game.levelHearts | 0) + 1; Game.hp = Math.min(maxHearts(), Game.hp + 1); Game.heartAnim = { t: 0, dur: 0.9 }; Audio.sfx('lifeUp'); }
   Game.scene = 'CLEAR'; Game.sceneT = 0;
   Audio.sfx('bossDie'); Audio.playMusic('clear');
 }
@@ -1036,6 +1040,7 @@ function spawnBurst(x, y, color, n) {
 }
 function updateParticles(dt) {
   if (Game.shakeT > 0) { Game.shakeT -= dt; if (Game.shakeT <= 0) Game.shakeMag = 0; }
+  if (Game.heartAnim) { Game.heartAnim.t += dt; if (Game.heartAnim.t >= Game.heartAnim.dur) Game.heartAnim = null; }
   const ps = Game.particles;
   for (const p of ps) { p.t += dt; p.vy += 380 * dt; p.x += p.vx * dt; p.y += p.vy * dt; }
   if (ps.length) Game.particles = ps.filter((p) => p.t < p.life);
@@ -1127,7 +1132,7 @@ function updateEnemies(dt) {
     Game.spawnT -= dt;
     if (Game.spawnT <= 0 && Game.enemies.length < L.maxAlive) {
       const side = (MODES[Game.mode].spawners === 2 && Game.rand() < 0.5) ? 'left' : 'right';
-      spawnEnemy(undefined, side); Game.spawnT = L.spawnEvery;
+      spawnEnemy(undefined, side); Game.spawnT = L.spawnEvery / (MODES[Game.mode].spawnMul || 1);
     }
   }
 
@@ -1288,11 +1293,13 @@ function update(dt) {
   h.jumpBuf = Input.consumeJump() ? C.JUMP_BUFFER : Math.max(0, h.jumpBuf - dt);
   const downPressed = Input.consumeDown();
 
-  // ── Dodge (LEFT+RIGHT): spin untouchable in place, cannot fall ──
+  // ── Dodge (hold LEFT+RIGHT): spin untouchable in place, cannot fall.
+  //    Lasts as long as both are held, up to DODGE_TIME (5s), then cooldown. ──
   if (h.dodgeT > 0) {
-    h.dodgeT = Math.max(0, h.dodgeT - dt);
+    const holding = Input.left && Input.right;
+    h.dodgeT = holding ? Math.max(0, h.dodgeT - dt) : 0;   // release ends it early
     h.vx = 0; h.vy = 0;                       // frozen — no fall while dodging
-    if (h.dodgeT === 0) { h.dodgeCd = C.DODGE_CD; }
+    if (h.dodgeT <= 0) { h.dodgeT = 0; h.dodgeCd = C.DODGE_CD; }
     updateEnemies(dt);
     if (!Game.bossActive && !Game.boss && Game.t >= C.LEVEL_TIME) activateBoss();
     updateBoss(dt);
@@ -1528,6 +1535,12 @@ function drawHero() {
     ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(rcx, rcy, 3, 0, 7); ctx.stroke();
     ctx.strokeStyle = '#8fd0ff'; ctx.beginPath(); ctx.arc(rcx, rcy, 3, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2); ctx.stroke();
   }
+  // dodge fuel bar above the hero (a bit higher than the shield ring, no overlap)
+  if (h.dodgeT > 0) {
+    const bw = 16, bx = Math.round(h.x - bw / 2), by = y - 12;
+    ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(bx - 1, by - 1, bw + 2, 4);
+    ctx.fillStyle = '#b58ce0'; ctx.fillRect(bx, by, Math.round(bw * (h.dodgeT / C.DODGE_TIME)), 2);
+  }
   ctx.globalAlpha = 1;
 }
 
@@ -1643,11 +1656,16 @@ function drawHeart(x, y, fill) {
 function drawHUD() {
   const C = CONFIG;
   ctx.textBaseline = 'top'; ctx.font = '8px monospace';
-  // health as (fractional) hearts; at least 3 slots, extra bonus hearts appended, capped
-  const slots = Math.min(8, Math.max(3, Math.ceil(Game.hp)));
-  for (let i = 0; i < slots; i++) drawHeart(6 + i * 11, 7, Math.max(0, Math.min(1, Game.hp - i)));
+  // health as (fractional) hearts; one slot per max heart, capped for display.
+  const slots = Math.min(9, Math.max(3, maxHearts()));
+  const a = Game.heartAnim, p = a ? Math.min(1, a.t / a.dur) : 1;   // new heart slides in from the left
+  for (let i = 0; i < slots; i++) {
+    let hx = 6 + i * 11;
+    if (a) hx = (i === 0) ? 6 - (1 - p) * 14 : 6 + (i - 1 + p) * 11;   // insert on the left, push the rest right
+    drawHeart(hx, 7, Math.max(0, Math.min(1, Game.hp - i)));
+  }
   ctx.fillStyle = '#eee8d5';
-  if (Game.hp > 8) ctx.fillText('+' + (Math.ceil(Game.hp) - 8), 6 + 8 * 11 + 1, 7);
+  if (maxHearts() > 9) ctx.fillText('+' + (maxHearts() - 9), 6 + 9 * 11 + 1, 7);
   // level name + score (top-left, second row; kept clear of the top-right buttons)
   ctx.fillStyle = '#93a1a1'; ctx.fillText('LV' + Game.level + ' ' + (LEVEL_NAMES[Game.level] || ''), 6, 18);
   ctx.fillStyle = '#8a9ba0'; ctx.fillText('POINTS ' + Game.points, 6, 28);

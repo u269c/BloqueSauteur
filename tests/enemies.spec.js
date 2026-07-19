@@ -13,7 +13,7 @@ test.describe('P4 · spawner cadence & roster', () => {
     const r = await page.evaluate(() => {
       const seen = (level) => {
         window.BS.start(); window.BS.reseed(42); window.BS.setLevel(level);
-        window.BS.state().enemies.length = 0;
+        window.BS.state().enemies.length = 0; window.BS.state().hero.ghost = 1e9;   // survive the full window
         const types = new Set();
         for (let i = 0; i < 60 * 120; i++) {           // ~60 s of fixed steps
           window.BS.stepFixed(1);
