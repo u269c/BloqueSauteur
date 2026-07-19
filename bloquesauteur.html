@@ -803,9 +803,10 @@ function buyItem(key) {
   const item = SHOP_ITEMS.find((i) => i.key === key); if (!item) return;
   if (Game.owned[key] || Game.points < item.price) return;
   Game.points -= item.price; Game.owned[key] = true;
-  if (key === 'halfHeart') { Game.heartsBought += 0.5; Game.hp = maxHearts(); }
-  if (key === 'heart') { Game.heartsBought += 1; Game.hp = maxHearts(); }
-  if (key === 'twoHearts') { Game.heartsBought += 2; Game.hp = maxHearts(); }
+  // A bought heart raises the max AND heals by that same amount only (not a full refill).
+  if (key === 'halfHeart') { Game.heartsBought += 0.5; Game.hp = Math.min(maxHearts(), Game.hp + 0.5); }
+  if (key === 'heart') { Game.heartsBought += 1; Game.hp = Math.min(maxHearts(), Game.hp + 1); }
+  if (key === 'twoHearts') { Game.heartsBought += 2; Game.hp = Math.min(maxHearts(), Game.hp + 2); }
   if (Game.merchant) Game.merchant.bought = true;
   Audio.sfx('buy'); Save.save(); buildShop();
 }
@@ -1664,6 +1665,13 @@ function heroColor(h) {
   return (p && p.css) || '#39a0ed';
 }
 
+// A tiny arm holding a tiny knife, drawn from body-edge (ax,ay) in direction dir (±1).
+function drawArmKnife(c, ax, ay, dir) {
+  c.fillStyle = '#0a0a0a'; c.fillRect(dir > 0 ? ax : ax - 4, ay, 4, 2);              // arm
+  c.fillStyle = '#8a5a30'; c.fillRect(dir > 0 ? ax + 4 : ax - 5, ay, 1, 2);          // hilt
+  c.fillStyle = '#d7dde4'; c.fillRect(dir > 0 ? ax + 5 : ax - 8, ay, 3, 1);          // blade
+}
+
 function drawHero() {
   const h = Game.hero, C = CONFIG;
   const tremble = h.frozen > 0 ? Math.round((Math.random() * 2 - 1) * 1.5) : 0;   // scream-freeze shiver
@@ -1697,6 +1705,14 @@ function drawHero() {
   }
   ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.fillRect(x + 2, y + 2, h.w - 4, 1);
   ctx.fillStyle = '#fff'; ctx.fillRect(x + (h.face > 0 ? h.w - 4 : 2), y + 6, 2, 2);   // eye
+  // per-mode arms + knives (normal: one; RAGE: two)
+  const my = y + (h.h >> 1);
+  if (Game.mode === 'normal' || Game.mode === 'rage') drawArmKnife(ctx, x + h.w, my, 1);
+  if (Game.mode === 'rage') drawArmKnife(ctx, x, my + 2, -1);
+  // white outline so the hero reads on dark backgrounds
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.fillRect(x - 1, y - 1, h.w + 2, 1); ctx.fillRect(x - 1, y + h.h - 2, h.w + 2, 1);
+  ctx.fillRect(x - 1, y - 1, 1, h.h); ctx.fillRect(x + h.w, y - 1, 1, h.h);
   ctx.restore();
 
   // spiked shield in front of the facing side (not rotated)
@@ -1845,8 +1861,13 @@ function drawHeart(x, y, fill) {
 function drawHUD() {
   const C = CONFIG;
   ctx.textBaseline = 'top'; ctx.font = '8px monospace';
+  // readability backdrop so hearts/text stay legible over any world
+  const slotsN = Math.min(9, Math.max(3, Math.ceil(maxHearts())));
+  ctx.fillStyle = 'rgba(6,8,14,0.45)';
+  ctx.fillRect(0, 0, Math.max(150, 12 + slotsN * 11), 40);
+  if (Game.scene === 'PLAY') ctx.fillRect(C.W / 2 - 26, 0, 52, 20);
   // health as (fractional) hearts; one slot per max heart, capped for display.
-  const slots = Math.min(9, Math.max(3, Math.ceil(maxHearts())));
+  const slots = slotsN;
   const a = Game.heartAnim, p = a ? Math.min(1, a.t / a.dur) : 1;   // new heart slides in from the left
   for (let i = 0; i < slots; i++) {
     let hx = 6 + i * 11;
