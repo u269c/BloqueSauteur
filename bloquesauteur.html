@@ -118,6 +118,9 @@
   .slot-card:hover { background:rgba(255,255,255,0.12); border-color:#f4d03f; }
   .slot-card .slot-name { font-weight:700; font-size:min(4.4vmin,20px); color:#f4d03f; }
   .slot-card .slot-sum { font-size:min(3.2vmin,13px); color:#b6c2c6; margin-top:.5em; line-height:1.4; }
+  .slot-card .acq { display:flex; gap:3px; margin-top:.6em; align-items:center; min-height:22px; flex-wrap:wrap; }
+  .slot-card .acq canvas { width:20px; height:20px; image-rendering:pixelated; }
+  .slot-card .acq-none { font-size:min(2.8vmin,11px); color:#7a8a90; font-style:italic; }
   .slot-card .slot-del { position:absolute; top:6px; right:8px; color:#93a1a1; font-size:min(3.6vmin,16px); background:none; border:none; cursor:pointer; }
   .slot-card .slot-del:hover { color:#e0392f; }
   .slot-back { align-self:flex-start; background:none; border:none; color:#93a1a1; font-size:min(3.6vmin,16px); cursor:pointer; padding:0 0 1vmin; }
@@ -318,14 +321,17 @@ function shuffled(arr, rng) {
 }
 
 // ── Merchant shop: 6 items (2×3), each purchasable once per slot. ──
+// persistent items (kept per slot across games) vs per-run consumables (hearts).
 const SHOP_ITEMS = [
-  { key: 'shield',     name: 'Spiked Shield', price: 20,  blurb: 'DOWN arms a shield; kills the next attacker (10s cooldown)' },
-  { key: 'doubleJump', name: 'Double Jump',   price: 25,  blurb: 'Jump again in mid-air' },
-  { key: 'dodge',      name: 'Dodge',         price: 25,  blurb: 'LEFT+RIGHT: spin untouchable for ~1s' },
-  { key: 'heart',      name: 'A Heart',       price: 30,  blurb: '+1 max heart' },
-  { key: 'twoHearts',  name: 'Two Hearts',    price: 50,  blurb: '+2 max hearts' },
-  { key: 'costume',    name: 'Striped Suit',  price: 120, blurb: 'A dapper striped costume' },
+  { key: 'shield',     name: 'Spiked Shield', price: 100, blurb: 'DOWN arms a shield; kills the next attacker (10s cooldown)' },
+  { key: 'doubleJump', name: 'Double Jump',   price: 125, blurb: 'Jump again in mid-air' },
+  { key: 'dodge',      name: 'Dodge',         price: 125, blurb: 'LEFT+RIGHT: spin untouchable (hold up to 5s)' },
+  { key: 'heart',      name: 'A Heart',       price: 30,  blurb: '+1 max heart (this game)' },
+  { key: 'twoHearts',  name: 'Two Hearts',    price: 50,  blurb: '+2 max hearts (this game)' },
+  { key: 'costume',    name: 'Striped Suit',  price: 150, blurb: 'A dapper striped costume' },
 ];
+// Which owned flags persist between games (purchases) vs reset each game (hearts).
+const PERSISTENT_ITEMS = ['shield', 'doubleJump', 'dodge', 'costume'];
 const MERCHANT = { landY: CONFIG.PLAT_Y, descendV: 42, riseV: 260, hoverAmp: 22 };
 
 // Chiptune loops + jingles (TRACKS format from the reference engine: [note, beats]).
@@ -477,29 +483,32 @@ const Game = {
 };
 
 // ── Persistence (localStorage) ────────────────────────────────────
-// Persistent progress lives in one of 3 save slots (localStorage). Muted is global.
+// A slot keeps PURCHASED skills/costume + prefs; points & hearts are per-game
+// (not persisted). Muted is global. SAVE_VERSION bump wipes old saves.
+const SAVE_VERSION = 2;
 function freshSlot() {
-  return { points: 0, owned: { shield: false, doubleJump: false, dodge: false, heart: false, twoHearts: false, costume: false }, heartsBought: 0, rainbowUnlocked: false, colorIdx: 0, mode: 'normal', best: 0 };
+  return { owned: { shield: false, doubleJump: false, dodge: false, costume: false }, rainbowUnlocked: false, colorIdx: 0, mode: 'normal', best: 0 };
 }
 const Save = {
   KEY: 'bloquesauteur.save',
-  data: { activeSlot: null, slots: [null, null, null], muted: false },
+  data: { v: SAVE_VERSION, activeSlot: null, slots: [null, null, null], muted: false },
   load() {
     let d = null;
     try { d = JSON.parse(localStorage.getItem(this.KEY) || 'null'); } catch (e) { d = null; }
-    if (d && Array.isArray(d.slots)) this.data = { activeSlot: null, slots: [d.slots[0] || null, d.slots[1] || null, d.slots[2] || null], muted: !!d.muted };
-    else this.data = { activeSlot: null, slots: [null, null, null], muted: false };
+    // Old schema (or corrupt) → wipe (effectively deletes all previous games).
+    if (d && d.v === SAVE_VERSION && Array.isArray(d.slots)) this.data = { v: SAVE_VERSION, activeSlot: null, slots: [d.slots[0] || null, d.slots[1] || null, d.slots[2] || null], muted: !!d.muted };
+    else this.data = { v: SAVE_VERSION, activeSlot: null, slots: [null, null, null], muted: false };
     Audio.muted = this.data.muted;
   },
   slot(i) { return this.data.slots[i]; },
-  // Activate slot i (creating it if empty) and copy its progress into Game.
+  // Activate slot i (creating it if empty) and copy its PERSISTENT progress into Game.
   select(i) {
     if (!this.data.slots[i]) this.data.slots[i] = freshSlot();
     this.data.activeSlot = i;
     const s = this.data.slots[i];
-    Game.points = s.points | 0;
-    Game.owned = Object.assign({ shield: false, doubleJump: false, dodge: false, heart: false, twoHearts: false, costume: false }, s.owned);
-    Game.heartsBought = s.heartsBought | 0;
+    Game.owned = { shield: false, doubleJump: false, dodge: false, heart: false, twoHearts: false, costume: false };
+    for (const k of PERSISTENT_ITEMS) Game.owned[k] = !!(s.owned && s.owned[k]);
+    Game.points = 0; Game.heartsBought = 0;          // per-game — start fresh
     Game.rainbowUnlocked = !!s.rainbowUnlocked;
     Game.best = s.best | 0;
     Game.mode = MODES[s.mode] ? s.mode : 'normal';
@@ -507,13 +516,13 @@ const Save = {
     if (PALETTE[Game.hero.colorIdx] && PALETTE[Game.hero.colorIdx].rainbow && !Game.rainbowUnlocked) Game.hero.colorIdx = 0;
     this.save();
   },
-  // Write Game's current progress back into the active slot + persist.
+  // Write only PERSISTENT progress back into the active slot + persist.
   save() {
     const i = this.data.activeSlot;
     if (i != null) {
+      const owned = {}; for (const k of PERSISTENT_ITEMS) owned[k] = !!(Game.owned && Game.owned[k]);
       this.data.slots[i] = {
-        points: Game.points | 0, owned: Game.owned || {}, heartsBought: Game.heartsBought | 0,
-        rainbowUnlocked: !!Game.rainbowUnlocked, colorIdx: Game.hero.colorIdx, mode: Game.mode, best: Game.best | 0,
+        owned, rainbowUnlocked: !!Game.rainbowUnlocked, colorIdx: Game.hero.colorIdx, mode: Game.mode, best: Game.best | 0,
       };
     }
     this.data.muted = Audio.muted;
@@ -684,10 +693,15 @@ function buildModes() {
 }
 
 // ── Save-slot menu ──
-function slotSummary(s) {
-  if (!s) return 'Empty · New Game';
-  const skills = ['shield', 'doubleJump', 'dodge', 'costume'].filter((k) => s.owned && s.owned[k]).length;
-  return 'Best: LV' + (s.best || 0) + '  ·  ' + (s.points | 0) + ' pts\n' + skills + ' item' + (skills === 1 ? '' : 's') + '  ·  ' + (MODES[s.mode] ? MODES[s.mode].name : 'NORMAL');
+// A small row of icons for the acquired (persistent) items in a slot.
+function acquiredIcons(owned) {
+  const row = document.createElement('div'); row.className = 'acq';
+  let any = false;
+  for (const k of PERSISTENT_ITEMS) {
+    if (owned && owned[k]) { any = true; const cv = document.createElement('canvas'); cv.width = 32; cv.height = 32; drawShopIcon(cv.getContext('2d'), k); row.appendChild(cv); }
+  }
+  if (!any) { const em = document.createElement('span'); em.className = 'acq-none'; em.textContent = 'no items yet'; row.appendChild(em); }
+  return row;
 }
 function buildSlots() {
   const box = document.getElementById('slots'); if (!box) return;
@@ -696,8 +710,10 @@ function buildSlots() {
     const s = Save.slot(i);
     const card = document.createElement('div'); card.className = 'slot-card';
     const name = document.createElement('div'); name.className = 'slot-name'; name.textContent = 'SLOT ' + (i + 1);
-    const sum = document.createElement('div'); sum.className = 'slot-sum'; sum.textContent = slotSummary(s);
+    const sum = document.createElement('div'); sum.className = 'slot-sum';
+    sum.textContent = s ? ('Best: LV' + (s.best || 0) + '  ·  ' + (MODES[s.mode] ? MODES[s.mode].name : 'NORMAL')) : 'Empty · New Game';
     card.appendChild(name); card.appendChild(sum);
+    if (s) card.appendChild(acquiredIcons(s.owned));         // show what's been acquired
     if (s) {
       const del = document.createElement('button'); del.className = 'slot-del'; del.textContent = '✕'; del.setAttribute('aria-label', 'delete slot ' + (i + 1));
       del.addEventListener('click', (e) => { e.stopPropagation(); e.preventDefault(); Save.del(i); buildSlots(); });
@@ -908,9 +924,11 @@ const Audio = {
 function firstGesture() { Audio.ensure(); }   // unlock audio on the very first gesture
 
 function maxHearts() { return CONFIG.LIVES_START + (Game.heartsBought | 0); }
-function startGame() {                         // TITLE → level 1 (points carry from the slot)
+function startGame() {                         // TITLE → level 1 (points/hearts reset per game)
   // Safety: ensure a slot is active without clobbering current Game choices (mode/colour).
   if (Save.data.activeSlot == null) { Save.data.activeSlot = 0; if (!Save.data.slots[0]) Save.data.slots[0] = freshSlot(); Save.save(); }
+  // Per-game reset: points to 0, hearts re-buyable, bought hearts cleared.
+  Game.points = 0; Game.heartsBought = 0; Game.owned.heart = false; Game.owned.twoHearts = false;
   Game.level = 1; Game.hp = maxHearts();
   reseed(pickSeed());
   hideOverlay('start');
@@ -970,13 +988,13 @@ function closeShop() {
   Audio.sfx(m && m.bought ? 'buzzThanks' : 'buzzGrumpy');
 }
 function afterShop() {
-  if (Game.level >= 4) { Game.scene = 'VICTORY'; Game.sceneT = 0; Audio.stopMusic(); Audio.playMusic('victory'); return; }
+  if (Game.level >= 4) { Game.points = 0; Game.scene = 'VICTORY'; Game.sceneT = 0; Audio.stopMusic(); Audio.playMusic('victory'); return; }  // points reset after the final merchant
   Game.level++;
   gotoIntro();
 }
 function onGameOver() { Game.scene = 'GAMEOVER'; Game.sceneT = 0; Audio.stopMusic(); Audio.playMusic('gameover'); }
 function gotoTitle() {
-  Game.scene = 'TITLE'; Game.paused = false; Audio.stopMusic(); Audio.playMusic('title');
+  Game.scene = 'TITLE'; Game.paused = false; Game.points = 0; Audio.stopMusic(); Audio.playMusic('title');   // quitting resets points
   showOverlay('start'); hideOverlay('pause'); showTitlePanel();
 }
 
@@ -1717,7 +1735,7 @@ function render() {
   if (Game.scene === 'INTRO') centerText([{ t: 'LEVEL ' + Game.level, big: true, color: '#f4d03f' }, { t: (WORLDS[Game.theme.world] || {}).name + ' · ' + (SKY_NAMES[Game.theme.sky] || ''), color: '#eee8d5' }, { t: 'survive 60 seconds, then the boss', color: '#93a1a1' }]);
   else if (Game.scene === 'CLEAR') centerText([{ t: 'LEVEL CLEAR', big: true, color: '#7cb342' }].concat(Game.gainedLife ? [{ t: '★ no-hit bonus: +1 heart! ★', color: '#f4d03f' }] : [{ t: 'points ' + Game.points, color: '#93a1a1' }]));
   else if (Game.scene === 'GAMEOVER') centerText([{ t: 'GAME OVER', big: true, color: '#e0392f' }, { t: 'reached level ' + Game.level, color: '#eee8d5' }, { t: 'tap to return to title', color: '#93a1a1' }]);
-  else if (Game.scene === 'VICTORY') centerText([{ t: 'VICTORY!', big: true, color: '#f4d03f' }, { t: 'you conquered the tower', color: '#eee8d5' }, { t: 'points ' + Game.points + '  ·  ' + MODES[Game.mode].name, color: '#93a1a1' }, { t: 'tap to return to title', color: '#93a1a1' }]);
+  else if (Game.scene === 'VICTORY') centerText([{ t: 'VICTORY!', big: true, color: '#f4d03f' }, { t: 'you conquered the tower', color: '#eee8d5' }, { t: MODES[Game.mode].name, color: '#93a1a1' }, { t: 'tap to return to title', color: '#93a1a1' }]);
 
   ctx.restore();
   updateShieldButton();

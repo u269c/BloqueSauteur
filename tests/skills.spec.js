@@ -75,14 +75,18 @@ test.describe('PR5 · dodge', () => {
   });
 });
 
-test.describe('PR5 · bought hearts raise the max', () => {
-  test('heartsBought increases starting HP on a new run', async ({ page }) => {
+test.describe('PR5 · bought hearts raise the max (this game)', () => {
+  test('buying a heart in-game increases max hearts and refills; resets next game', async ({ page }) => {
     const r = await page.evaluate(() => {
-      window.BS.Save.select(0);
-      const st = window.BS.state(); st.heartsBought = 2;
-      window.BS.startGame();               // starts a run → hp = base + bought
-      return { hp: st.hp, base: window.BS.CONFIG.LIVES_START };
+      window.BS.Save.select(0); window.BS.startGame();
+      const st = window.BS.state(), base = window.BS.CONFIG.LIVES_START;
+      st.points = 100; window.BS.buyItem('twoHearts');   // +2 max
+      const maxAfter = base + st.heartsBought;
+      window.BS.startGame();                    // new game → hearts reset
+      return { maxAfter, base, heartsNext: st.heartsBought, ownedTwoNext: st.owned.twoHearts };
     });
-    expect(r.hp).toBe(r.base + 2);
+    expect(r.maxAfter).toBe(r.base + 2);        // raised this game
+    expect(r.heartsNext).toBe(0);               // reset next game
+    expect(r.ownedTwoNext).toBe(false);         // re-buyable
   });
 });

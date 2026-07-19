@@ -29,17 +29,17 @@ test('merchant appears after the boss and opens the shop', async ({ page }) => {
 
 test('buying deducts points, marks owned, greys out, and persists', async ({ page }) => {
   await openGame(page); await enterPlayPanel(page, 0);
-  await toShop(page, 40);
+  await toShop(page, 200);
   const shield = page.locator('.shop-item[data-key="shield"]');
-  await shield.click();                                    // 20 pts
+  await shield.click();                                    // 100 pts
   const r = await page.evaluate(() => ({ points: window.BS.state().points, owned: window.BS.state().owned.shield, saved: window.BS.Save.slot(0).owned.shield }));
-  expect(r.points).toBe(20);          // 40 − 20
+  expect(r.points).toBe(100);         // 200 − 100
   expect(r.owned).toBe(true);
-  expect(r.saved).toBe(true);          // persisted to the slot
+  expect(r.saved).toBe(true);          // persisted to the slot (shield is a purchase)
   await expect(shield).toHaveClass(/owned/);
   // clicking again does nothing (already owned)
   await shield.click({ force: true });
-  expect(await page.evaluate(() => window.BS.state().points)).toBe(20);
+  expect(await page.evaluate(() => window.BS.state().points)).toBe(100);
 });
 
 test('cannot afford → greyed and unbuyable (neg. control vs affordable)', async ({ page }) => {
