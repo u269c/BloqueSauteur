@@ -80,7 +80,7 @@
 
   /* ── Single-screen loadout: [big hero] [colour squares] [mode buttons] ── */
   .loadout { display:flex; align-items:center; justify-content:center; gap:3vmin; margin-top:0.5vmin; }
-  #hero-preview { image-rendering:pixelated; height:min(26vmin,150px); width:auto; background:rgba(255,255,255,0.05); border:2px solid rgba(255,255,255,0.14); border-radius:10px; padding:4px; }
+  #hero-preview { image-rendering:pixelated; height:min(31vmin,178px); width:auto; background:rgba(255,255,255,0.05); border:2px solid rgba(255,255,255,0.14); border-radius:10px; padding:4px; align-self:center; }
 
   /* colour squares: a compact 2-wide vertical block beside the hero */
   .swatches { display:grid; grid-template-columns:repeat(2,1fr); gap:1.1vmin; }
@@ -169,7 +169,6 @@
       <div class="swatches" id="swatches"></div>
       <div class="modes" id="modes"></div>
     </div>
-    <p class="mode-desc" id="mode-desc"></p>
     <button class="play-btn" id="play-btn">▶ PLAY</button>
     <p class="version" id="version"></p>
   </div>
@@ -672,11 +671,6 @@ function buildSwatches() {
   }
 }
 
-const MODE_DESC = {
-  easy: 'Relaxed — hits are harmless; only the hazard hurts. +1 heart per level.',
-  normal: 'A hit chips ¼ heart; +1 heart per level. Bosses 3→6 HP.',
-  rage: 'Two spawners; hits cost ½ heart + 1 point; no heart bonus. Bosses 6→12.',
-};
 function buildModes() {
   const box = document.getElementById('modes'); if (!box) return;
   box.innerHTML = '';
@@ -687,7 +681,6 @@ function buildModes() {
     b.addEventListener('click', (e) => { e.preventDefault(); onFirstGesture(); Game.mode = key; Save.save(); buildModes(); drawHeroPreview(); });
     box.appendChild(b);
   }
-  const d = document.getElementById('mode-desc'); if (d) d.textContent = MODE_DESC[Game.mode] || '';
 }
 
 // ── Save-slot menu ──
@@ -1675,11 +1668,12 @@ function heroColor(h) {
   return (p && p.css) || '#39a0ed';
 }
 
-// A tiny arm holding a tiny knife, drawn from body-edge (ax,ay) in direction dir (±1).
+// A tiny arm from body-edge (ax,ay) in direction dir (±1), holding a knife pointing UP.
 function drawArmKnife(c, ax, ay, dir) {
-  c.fillStyle = '#0a0a0a'; c.fillRect(dir > 0 ? ax : ax - 4, ay, 4, 2);              // arm
-  c.fillStyle = '#8a5a30'; c.fillRect(dir > 0 ? ax + 4 : ax - 5, ay, 1, 2);          // hilt
-  c.fillStyle = '#d7dde4'; c.fillRect(dir > 0 ? ax + 5 : ax - 8, ay, 3, 1);          // blade
+  const hand = dir > 0 ? ax + 4 : ax - 6;                                            // outer end (fist)
+  c.fillStyle = '#0a0a0a'; c.fillRect(dir > 0 ? ax : ax - 4, ay, 4, 2);              // arm (horizontal)
+  c.fillStyle = '#8a5a30'; c.fillRect(hand, ay - 1, 2, 2);                           // hilt / fist
+  c.fillStyle = '#d7dde4'; c.fillRect(hand, ay - 6, 2, 5);                           // blade pointing up
 }
 
 function drawHero() {
