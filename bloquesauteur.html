@@ -326,18 +326,112 @@ const SHOP_ITEMS = [
 const PERSISTENT_ITEMS = ['shield', 'doubleJump', 'dodge', 'strongHit', 'costume'];
 const MERCHANT = { landY: CONFIG.PLAT_Y, descendV: 42, riseV: 260, hoverAmp: 22 };
 
-// Chiptune loops + jingles (TRACKS format from the reference engine: [note, beats]).
+// ── MUSIC ────────────────────────────────────────────────────────
+// Two shapes: short one-shot JINGLES use a single `notes` line; the eight long
+// genre SONGS use parallel `layers` — a bass, a lead (and sometimes an arp), plus a
+// `drum:true` percussion line (K=kick, S=snare, H=hat). Songs are built from bar-sized
+// patterns repeated with `rep()` so each loop runs ~30-40s instead of a few seconds.
+const rep = (arr, n) => { let o = []; while (n-- > 0) o = o.concat(arr); return o; };
+const roll = (note, n, b = 0.25) => { const a = []; while (n-- > 0) a.push([note, b]); return a; };
+// one bar of bass: root pulse + fifth (mellow, on-beat)
+const bb = (root, fifth) => [[root, 1], [root, 0.5], [fifth, 0.5], [root, 1], [fifth, 1]];
+// one bar of off-beat bass (the "and" of each beat — house/techno pump)
+const bo = (root) => [['R', 0.5], [root, 0.5], ['R', 0.5], [root, 0.5], ['R', 0.5], [root, 0.5], ['R', 0.5], [root, 0.5]];
+// drum bars (each sums to 4 beats)
+const DRUM = {
+  house:  [['K',.5],['H',.5],['S',.5],['H',.5],['K',.5],['H',.5],['S',.5],['H',.5]],
+  four:   [['K',.5],['H',.5],['K',.5],['H',.5],['K',.5],['H',.5],['K',.5],['H',.5]],
+  techno: [['K',.5],['H',.5],['K',.5],['S',.5],['K',.5],['H',.5],['K',.5],['S',.5]],
+  hard:   [['K',.25],['K',.25],['H',.5],['S',.5],['H',.5],['K',.5],['H',.5],['S',.25],['H',.25],['H',.5]],
+  jazz:   [['H',.5],['S',.5],['H',.5],['K',.5],['H',.5],['S',.5],['K',.5],['H',.5]],
+  half:   [['K',1],['H',.5],['S',.5],['H',.5],['K',.5],['S',1]],
+};
+const drums = (bar, bars) => ({ drum: true, notes: rep(bar, bars) });
+
 const MUSIC = {
-  title:   { bpm: 120, wave: 'square', gain: 0.22, loop: true, notes: [['E5',1],['B4',.5],['C5',.5],['D5',1],['C5',.5],['B4',.5],['A4',1],['A4',.5],['C5',.5],['E5',1],['D5',.5],['C5',.5],['B4',1.5],['R',.5]] },
-  1:       { bpm: 112, wave: 'square', gain: 0.20, loop: true, notes: [['C5',1],['E5',1],['G5',1],['E5',1],['A4',1],['C5',1],['E5',1],['C5',1],['F4',1],['A4',1],['C5',1],['A4',1],['G4',2],['G5',2]] },
-  2:       { bpm: 128, wave: 'square', gain: 0.20, loop: true, notes: [['D5',.5],['A4',.5],['D5',.5],['F5',.5],['E5',.5],['C5',.5],['E5',.5],['G5',.5],['D5',.5],['A4',.5],['D5',.5],['F5',.5],['A5',1],['G5',1]] },
-  3:       { bpm: 140, wave: 'square', gain: 0.20, loop: true, notes: [['E5',.5],['E5',.5],['R',.5],['E5',.5],['R',.5],['C5',.5],['E5',.5],['G5',1],['G4',1],['C5',.75],['G4',.75],['E4',.5],['A4',.5],['B4',.5],['A4',.5],['G4',.5]] },
-  4:       { bpm: 152, wave: 'sawtooth', gain: 0.18, loop: true, notes: [['A4',.5],['C5',.5],['E5',.5],['A5',.5],['G5',.5],['E5',.5],['C5',.5],['E5',.5],['F4',.5],['A4',.5],['C5',.5],['F5',.5],['E5',.5],['B4',.5],['G4',.5],['E4',.5]] },
-  boss:    { bpm: 144, wave: 'sawtooth', gain: 0.20, loop: true, notes: [['D4',.5],['D4',.5],['F4',.5],['D4',.5],['A4',.5],['D4',.5],['G4',.5],['F4',.5],['E4',.5],['E4',.5],['G4',.5],['E4',.5],['C5',1],['A4',1]] },
+  // TITLE — French Touch / Ibiza sunset (Am–F–C–G), filtered pluck over a house groove.
+  title: { bpm: 116, loop: true, layers: [
+    { wave: 'triangle', gain: 0.19, notes: rep(bb('A2','E3').concat(bb('F2','C3'), bb('C3','G3'), bb('G2','D3')), 4) },
+    { wave: 'square', gain: 0.13, sus: 0.55, notes: rep([
+      ['E5',.5],['R',.5],['C5',.5],['E5',.5],['A4',.5],['R',.5],['C5',.5],['E5',.5],
+      ['F5',.5],['R',.5],['C5',.5],['A4',.5],['C5',.5],['R',.5],['A4',.5],['F5',.5],
+      ['E5',.5],['R',.5],['G4',.5],['C5',.5],['E5',.5],['R',.5],['G5',.5],['E5',.5],
+      ['D5',.5],['R',.5],['B4',.5],['G4',.5],['D5',.5],['R',.5],['B4',.5],['D5',.5] ], 4) },
+    drums(DRUM.house, 16) ] },
+
+  // L1 — big-room EDM anthem in C (C–G–Am–F), four-on-the-floor + super-saw arp.
+  1: { bpm: 128, loop: true, layers: [
+    { wave: 'sawtooth', gain: 0.16, notes: rep(bo('C2').concat(bo('G2'), bo('A2'), bo('F2')), 4) },
+    { wave: 'sawtooth', gain: 0.12, sus: 0.5, notes: rep([
+      ['C5',.5],['E5',.5],['G5',.5],['C6',.5],['G5',.5],['E5',.5],['G5',.5],['E5',.5],
+      ['B4',.5],['D5',.5],['G5',.5],['B5',.5],['G5',.5],['D5',.5],['G5',.5],['D5',.5],
+      ['A4',.5],['C5',.5],['E5',.5],['A5',.5],['E5',.5],['C5',.5],['E5',.5],['C5',.5],
+      ['F4',.5],['A4',.5],['C5',.5],['F5',.5],['A5',.5],['F5',.5],['C5',.5],['A4',.5] ], 4) },
+    drums(DRUM.four, 16) ] },
+
+  // L2 — jazz fusion (Dm7–G7–Cmaj7–Am7), walking bass + swung Dorian lead.
+  2: { bpm: 116, loop: true, layers: [
+    { wave: 'triangle', gain: 0.18, notes: rep([
+      ['D2',1],['F2',1],['A2',1],['C3',1], ['G2',1],['B2',1],['D3',1],['F3',1],
+      ['C3',1],['E3',1],['G3',1],['B2',1], ['A2',1],['C3',1],['E3',1],['G3',1] ], 4) },
+    { wave: 'square', gain: 0.12, sus: 0.7, notes: rep([
+      ['A4',.75],['D5',.25],['F5',.5],['E5',.5],['D5',.5],['F5',.5],['A5',.5],['G5',.5],
+      ['B4',.75],['D5',.25],['F5',.5],['B5',.5],['A5',.5],['G5',.5],['F5',.5],['D5',.5],
+      ['E5',.75],['G5',.25],['B5',.5],['C6',.5],['B5',.5],['G5',.5],['E5',.5],['D5',.5],
+      ['C5',.75],['E5',.25],['A5',.5],['G5',.5],['E5',.5],['C5',.5],['A4',.5],['B4',.5] ], 4) },
+    drums(DRUM.jazz, 16) ] },
+
+  // L3 — Mosimann-style French house party (F–Bb–C–Dm), staccato vocal-chop stabs.
+  3: { bpm: 126, loop: true, layers: [
+    { wave: 'sawtooth', gain: 0.16, notes: rep(bo('F2').concat(bo('A#2'), bo('C3'), bo('D3')), 4) },
+    { wave: 'square', gain: 0.13, sus: 0.35, notes: rep([
+      ['F5',.25],['F5',.25],['R',.5],['A5',.25],['A5',.25],['R',.5],['C6',.5],['A5',.5],
+      ['A#5',.25],['A#5',.25],['R',.5],['D6',.25],['D6',.25],['R',.5],['F6',.5],['D6',.5],
+      ['C6',.25],['C6',.25],['R',.5],['G5',.25],['G5',.25],['R',.5],['E5',.5],['G5',.5],
+      ['D6',.25],['A5',.25],['F5',.5],['D5',.25],['F5',.25],['A5',.5],['D6',.5],['A5',.5] ], 4) },
+    drums(DRUM.house, 16) ] },
+
+  // L4 — REZZ-style dark mid-tempo groove (Em), sparse growly saw over a half-time beat.
+  4: { bpm: 100, loop: true, layers: [
+    { wave: 'sawtooth', gain: 0.2, notes: rep([
+      ['E2',.5],['E2',.5],['E3',.5],['E2',.5],['E2',.5],['G2',.5],['E2',.5],['D2',.5] ], 16) },
+    { wave: 'sawtooth', gain: 0.13, sus: 0.9, notes: rep([
+      ['E4',1],['R',.5],['G4',.5],['B4',1],['R',1],['A4',.5],['G4',.5],['E4',.5],['D4',.5],['E4',1],
+      ['E4',1],['R',.5],['D4',.5],['B3',1],['R',1],['E4',.5],['G4',.5],['B4',.5],['A4',.5],['G4',1] ], 4) },
+    drums(DRUM.half, 16) ] },
+
+  // L5 — German techno (Am), hypnotic offbeat bass + minimal repeating stab. Relentless.
+  5: { bpm: 132, loop: true, layers: [
+    { wave: 'sawtooth', gain: 0.17, notes: rep(bo('A2'), 16) },
+    { wave: 'square', gain: 0.11, sus: 0.4, notes: rep([
+      ['A4',.5],['R',.5],['A4',.5],['R',.5],['C5',.5],['R',.5],['A4',.5],['R',.5],
+      ['A4',.5],['R',.5],['A4',.5],['R',.5],['E5',.5],['R',.5],['D5',.5],['R',.5] ], 8) },
+    drums(DRUM.techno, 16) ] },
+
+  // BOSS — Charlotte de Witte hard techno (Dm), rolling 16th acid bass + aggressive stabs.
+  boss: { bpm: 140, loop: true, layers: [
+    { wave: 'sawtooth', gain: 0.17, notes: rep(roll('D2',16).concat(roll('D2',16), roll('A#1',16), roll('C2',16)), 4) },
+    { wave: 'sawtooth', gain: 0.12, sus: 0.3, notes: rep([
+      ['D5',.25],['R',.25],['D5',.5],['F5',.25],['R',.25],['D5',.5],['A5',.5],['G5',.5],
+      ['F5',.25],['R',.25],['F5',.5],['A5',.25],['R',.25],['F5',.5],['D6',.5],['A5',.5],
+      ['C5',.25],['R',.25],['C5',.5],['D5',.25],['R',.25],['C5',.5],['A#4',.5],['C5',.5],
+      ['A4',.25],['R',.25],['A4',.5],['D5',.25],['R',.25],['A4',.5],['F5',.5],['D5',.5] ], 4) },
+    drums(DRUM.hard, 16) ] },
+
+  // MERCHANT — deadmau5 "Ghosts 'n' Stuff" retro (F#m), progressive-house arpeggio riff.
+  merchant: { bpm: 123, loop: true, layers: [
+    { wave: 'sawtooth', gain: 0.16, notes: rep(bo('F#2').concat(bo('D2'), bo('A2'), bo('E2')), 4) },
+    { wave: 'square', gain: 0.12, sus: 0.45, notes: rep([
+      ['F#4',.5],['A4',.5],['C#5',.5],['F#5',.5],['C#5',.5],['A4',.5],['C#5',.5],['A4',.5],
+      ['D4',.5],['F#4',.5],['A4',.5],['D5',.5],['A4',.5],['F#4',.5],['A4',.5],['F#4',.5],
+      ['A4',.5],['C#5',.5],['E5',.5],['A5',.5],['E5',.5],['C#5',.5],['E5',.5],['C#5',.5],
+      ['E4',.5],['G#4',.5],['B4',.5],['E5',.5],['B4',.5],['G#4',.5],['B4',.5],['G#4',.5] ], 4) },
+    drums(DRUM.four, 16) ] },
+
+  // ── one-shot jingles (single melodic line) ──
   clear:   { bpm: 140, wave: 'square', gain: 0.26, loop: false, notes: [['C5',.5],['E5',.5],['G5',.5],['C6',1],['G5',.5],['C6',1.5]] },
   victory: { bpm: 132, wave: 'square', gain: 0.28, loop: false, notes: [['C5',.5],['C5',.5],['C5',.5],['C5',1],['G4',.5],['A4',.5],['C5',1],['A4',.5],['C5',2]] },
   gameover:{ bpm: 100, wave: 'triangle', gain: 0.26, loop: false, notes: [['C5',.5],['G4',.5],['E4',.5],['C4',1.5],['R',.3],['G3',2]] },
-  merchant:{ bpm: 150, wave: 'square', gain: 0.24, loop: true, notes: [['C5',.5],['E5',.25],['G5',.25],['E5',.5],['A4',.5],['C5',.25],['E5',.25],['C5',.5],['F4',.5],['A4',.25],['C5',.25],['A4',.5],['G4',.5],['B4',.25],['D5',.25],['G5',.5]] },
 };
 
 // ══════════════════════════════════════════════════════════════════
@@ -839,11 +933,30 @@ const Audio = {
       this.musicGain = this.ctx.createGain(); this.musicGain.gain.value = 0.7;
       this.sfxGain.connect(this.master); this.musicGain.connect(this.master);
       this.master.connect(this.ctx.destination);
+      // white-noise buffer for drum snares/hats
+      const n = (this.ctx.sampleRate * 0.3) | 0, buf = this.ctx.createBuffer(1, n, this.ctx.sampleRate), d = buf.getChannelData(0);
+      for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+      this.noise = buf;
       this.applyGain();
     }
     if (this.ctx.state === 'suspended') this.ctx.resume();
     this.unlocked = this.ctx.state === 'running';
   },
+  // ── drum voices (registered in music.oscs so stopMusic hard-stops them) ──
+  _kick(t) {
+    const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+    o.type = 'sine'; o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(48, t + 0.11);
+    g.gain.setValueAtTime(0.75, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
+    o.connect(g); g.connect(this.musicGain); o.start(t); o.stop(t + 0.16); o.__end = t + 0.16; this.music.oscs.push(o);
+  },
+  _noiseHit(t, hp, gain, dur) {
+    const s = this.ctx.createBufferSource(); s.buffer = this.noise;
+    const f = this.ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = hp;
+    const g = this.ctx.createGain(); g.gain.setValueAtTime(gain, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    s.connect(f); f.connect(g); g.connect(this.musicGain); s.start(t); s.stop(t + dur + 0.02); s.__end = t + dur + 0.02; this.music.oscs.push(s);
+  },
+  _snare(t) { this._noiseHit(t, 1400, 0.5, 0.14); },
+  _hat(t) { this._noiseHit(t, 7000, 0.22, 0.035); },
   applyGain() { if (this.master) this.master.gain.value = (this.muted || Game.paused) ? 0 : 0.55; },
   // ── music layer (looping tracks + one-shot jingles) ──
   playMusic(key) {
@@ -861,19 +974,34 @@ const Audio = {
     this._loop(track, this.ctx.currentTime + 0.06);
   },
   _loop(track, t0) {
-    const beat = 60 / (track.bpm * (this.music.rate || 1)); let t = t0;
-    const wave = this.music.wave || track.wave;
+    const beat = 60 / (track.bpm * (this.music.rate || 1));
     // prune finished oscillators so the ref list stays bounded
     this.music.oscs = this.music.oscs.filter((o) => o.__end > this.ctx.currentTime);
-    for (const [note, beats] of track.notes) {
-      const dur = beats * beat;
-      if (note !== 'R') { const o = this._note(this.noteToFreq(note), dur, wave, track.gain, t, this.musicGain); if (o) this.music.oscs.push(o); }
-      t += dur;
+    // A track is either a single melodic line (`notes`, used by jingles) or a set of
+    // parallel voices (`layers`: melodic {wave,gain,notes} + percussion {drum:true,notes}).
+    const layers = track.layers || [{ wave: this.music.wave || track.wave, gain: track.gain, notes: track.notes }];
+    let loopDur = 0;
+    for (const L of layers) {
+      let t = t0;
+      if (L.drum) {
+        for (const [hit, beats] of L.notes) {
+          if (hit === 'K') this._kick(t); else if (hit === 'S') this._snare(t); else if (hit === 'H') this._hat(t);
+          t += beats * beat;
+        }
+      } else {
+        const wave = L.wave || this.music.wave || 'square', gain = L.gain != null ? L.gain : (track.gain || 0.2), sus = L.sus != null ? L.sus : 0.9;
+        for (const [note, beats] of L.notes) {
+          const dur = beats * beat;
+          if (note && note !== 'R') { const o = this._note(this.noteToFreq(note), dur * sus, wave, gain, t, this.musicGain); if (o) this.music.oscs.push(o); }
+          t += dur;
+        }
+      }
+      loopDur = Math.max(loopDur, t - t0);
     }
-    const ms = (t - this.ctx.currentTime) * 1000;
+    const tEnd = t0 + loopDur, ms = (tEnd - this.ctx.currentTime) * 1000;
     this.music.timer = setTimeout(() => {
       if (!this.music.playing) return;
-      if (track.loop) this._loop(track, t); else this.music.playing = false;
+      if (track.loop !== false) this._loop(track, tEnd); else this.music.playing = false;
     }, Math.max(20, ms - 100));
   },
   // Hard-stop: cancel the next iteration AND stop every already-scheduled music
@@ -2065,6 +2193,9 @@ window.BS = {
   audioState: () => (Audio.ctx ? Audio.ctx.state : 'none'),
   musicKey: () => Audio.music.key,
   musicRate: () => Audio.music.rate,
+  musicVoices: () => Audio.music.oscs.length,   // scheduled osc/drum nodes (multi-voice songs schedule many)
+  playMusic: (k) => Audio.playMusic(k),
+  trackBars: (k) => { const t = MUSIC[k], L = t && t.layers && t.layers[0]; return L ? Math.round(L.notes.reduce((s, n) => s + n[1], 0) / 4) : 0; },
   masterGain: () => (Audio.master ? Audio.master.gain.value : null),
   muted: () => Audio.muted,
   Save,

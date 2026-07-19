@@ -50,6 +50,11 @@ Pick a **save slot** (1 of 3), a **mode**, and your **hero colour**, then hit PL
 Health is fractional hearts drawn as **pie wedges** (start with 3). Normal/RAGE play
 faster, more frenetic music.
 
+Each screen has its own long, looping **chiptune track** — a full multi-voice arrangement
+(bass + lead + synthesised kick/snare/hats), one per genre: French-touch title, EDM,
+jazz-fusion, French-house, a dark REZZ-style groove, hard techno, a Charlotte-de-Witte boss
+theme, and a "Ghosts 'n' Stuff"-flavoured merchant loop. Normal/RAGE speed the tempo up.
+
 ## The merchant & skills
 
 After every level a merchant parachutes in and opens a shop (spend your points; buy each
