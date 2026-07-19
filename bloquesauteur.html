@@ -468,6 +468,8 @@ const Game = {
   heartAnim: null,      // {t, dur} — heart-insert HUD animation
   particles: [],
   shakeT: 0, shakeMag: 0,
+  combo: 0,                      // airborne kill chain (resets on landing)
+  floaters: [],                  // rising +points / xN combo texts
   sceneT: 0,                     // time in the current transient scene (INTRO/CLEAR/…)
   gainedLife: false,             // did the last level clear award a no-hit life?
   rainbowUnlocked: false,        // unlocked on reaching level 4 (persisted)
@@ -944,7 +946,7 @@ function startGame() {                         // TITLE → level 1 (points/hear
   // Safety: ensure a slot is active without clobbering current Game choices (mode/colour).
   if (Save.data.activeSlot == null) { Save.data.activeSlot = 0; if (!Save.data.slots[0]) Save.data.slots[0] = freshSlot(); Save.save(); }
   // Per-game reset: points to 0, hearts re-buyable, bought/earned hearts cleared.
-  Game.points = 0; Game.heartsBought = 0; Game.levelHearts = 0; Game.owned.heart = false; Game.owned.twoHearts = false; Game.owned.halfHeart = false; Game.heartAnim = null;
+  Game.points = 0; Game.heartsBought = 0; Game.levelHearts = 0; Game.owned.heart = false; Game.owned.twoHearts = false; Game.owned.halfHeart = false; Game.heartAnim = null; Game.combo = 0; Game.floaters = [];
   Game.level = 1; Game.hp = maxHearts();
   reseed(pickSeed());
   hideOverlay('start');
@@ -1051,9 +1053,22 @@ function spawnBurst(x, y, color, n) {
   }
   if (Game.particles.length > 240) Game.particles.splice(0, Game.particles.length - 240);
 }
-// Award a monster kill: points + burst + sfx. Combo scaling is layered in (PR2).
+function addFloater(x, y, text, color) {
+  Game.floaters.push({ x, y, text, color: color || '#eee8d5', t: 0, life: 0.9 });
+  if (Game.floaters.length > 24) Game.floaters.shift();
+}
+// Award a monster kill. Airborne kills build a combo: the k-th airborne kill in a
+// chain awards 2*min(k,10)-1 points (a chain of N totals N², capped at the 10x tier).
 function addKill(x, y, color) {
-  Game.points += 1;
+  let award = 1;
+  if (!Game.hero.onGround) {
+    Game.combo += 1;
+    const m = Math.min(Game.combo, 10);
+    award = 2 * m - 1;
+    if (Game.combo >= 2) { addFloater(x, y - 8, 'x' + m + '  +' + award, '#f4d03f'); Audio.sfx('lifeUp'); }
+    else addFloater(x, y - 8, '+' + award, '#eee8d5');
+  } else addFloater(x, y - 8, '+' + award, '#eee8d5');
+  Game.points += award;
   Audio.sfx('stomp'); spawnBurst(x, y, color, 12);
 }
 function updateParticles(dt) {
@@ -1062,6 +1077,9 @@ function updateParticles(dt) {
   const ps = Game.particles;
   for (const p of ps) { p.t += dt; p.vy += 380 * dt; p.x += p.vx * dt; p.y += p.vy * dt; }
   if (ps.length) Game.particles = ps.filter((p) => p.t < p.life);
+  const fs = Game.floaters;
+  for (const f of fs) { f.t += dt; f.y -= 22 * dt; }
+  if (fs.length) Game.floaters = fs.filter((f) => f.t < f.life);
 }
 
 // Solid ground top at column index, or null (hole / off-platform).
@@ -1376,6 +1394,7 @@ function update(dt) {
   collideHero(h, dt);
   // Strong-hit floor blast: landing a dive clears nearby monsters (and blasts the boss).
   if (h.strong && h.onGround && wasAir) { strongHitBlast(); h.strong = false; }
+  if (wasAir && h.onGround) Game.combo = 0;   // landing ends the combo chain
 
   // lava death — fell into a hole or off an edge and reached the lava surface
   if (h.y >= C.LAVA_Y) heroDie();
@@ -1671,6 +1690,14 @@ function drawParticles() {
     ctx.fillRect(Math.round(p.x), Math.round(p.y), p.r, p.r);
   }
   ctx.globalAlpha = 1;
+  // rising combo / points floaters
+  ctx.textAlign = 'center'; ctx.font = '7px monospace';
+  for (const f of Game.floaters) {
+    ctx.globalAlpha = Math.max(0, 1 - f.t / f.life);
+    ctx.fillStyle = f.color;
+    ctx.fillText(f.text, Math.round(f.x), Math.round(f.y));
+  }
+  ctx.globalAlpha = 1; ctx.textAlign = 'left';
 }
 
 // fill in [0,1] — draws an empty heart then clips a left-anchored fraction in red.
@@ -1880,6 +1907,7 @@ window.BS = {
   boss: () => Game.boss,
   activateBoss,
   bossHit: () => Game.boss && bossHit(Game.boss),
+  addKill,
   Input,
   audioState: () => (Audio.ctx ? Audio.ctx.state : 'none'),
   musicKey: () => Audio.music.key,
