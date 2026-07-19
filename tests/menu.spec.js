@@ -41,15 +41,17 @@ test.describe('PR3 · save slots', () => {
   });
 });
 
-test.describe('PR3 · mode descriptions', () => {
-  test('selecting a mode updates the description line', async ({ page }) => {
+test.describe('PR3 · mode selection', () => {
+  test('clicking a mode highlights it and updates the active mode', async ({ page }) => {
     await openGame(page);
     await enterPlayPanel(page, 0);
     await page.locator('.mode-btn.easy').click();
-    await expect(page.locator('#mode-desc')).toContainText('Relaxed');
+    await expect(page.locator('.mode-btn.easy')).toHaveClass(/sel/);
+    expect(await page.evaluate(() => window.BS.mode())).toBe('easy');
     await page.locator('.mode-btn.rage').click();
-    await expect(page.locator('#mode-desc')).toContainText('spawners');
-    await expect(page.locator('#mode-desc')).not.toContainText('Relaxed');   // neg. control: updated
+    await expect(page.locator('.mode-btn.rage')).toHaveClass(/sel/);
+    await expect(page.locator('.mode-btn.easy')).not.toHaveClass(/sel/);   // neg. control: switched
+    expect(await page.evaluate(() => window.BS.mode())).toBe('rage');
   });
 });
 
