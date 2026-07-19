@@ -21,7 +21,6 @@ test.describe('PR3 · save slots', () => {
     await openGame(page);
     await enterPlayPanel(page, 0);
     await page.evaluate(() => { window.BS.state().owned.shield = true; window.BS.Save.save(); });
-    await page.locator('#slot-back').click();
     await enterPlayPanel(page, 1);
     await page.evaluate(() => { window.BS.state().owned.dodge = true; window.BS.Save.save(); });
     await page.reload(); await page.waitForFunction(() => !!window.BS);
@@ -35,7 +34,6 @@ test.describe('PR3 · save slots', () => {
     await openGame(page);
     await enterPlayPanel(page, 0);
     await page.evaluate(() => { window.BS.state().owned.shield = true; window.BS.Save.save(); });
-    await page.locator('#slot-back').click();
     expect(await page.evaluate(() => !!window.BS.Save.slot(0))).toBe(true);
     await page.locator('#slots .slot-card').first().locator('.slot-del').click();
     expect(await page.evaluate(() => window.BS.Save.slot(0))).toBeNull();
@@ -48,10 +46,10 @@ test.describe('PR3 · mode descriptions', () => {
     await openGame(page);
     await enterPlayPanel(page, 0);
     await page.locator('.mode-btn.easy').click();
-    await expect(page.locator('#mode-desc')).toContainText('harmless');
+    await expect(page.locator('#mode-desc')).toContainText('Relaxed');
     await page.locator('.mode-btn.rage').click();
-    await expect(page.locator('#mode-desc')).toContainText('TWO spawn');
-    await expect(page.locator('#mode-desc')).not.toContainText('harmless');   // neg. control: updated
+    await expect(page.locator('#mode-desc')).toContainText('spawners');
+    await expect(page.locator('#mode-desc')).not.toContainText('Relaxed');   // neg. control: updated
   });
 });
 
