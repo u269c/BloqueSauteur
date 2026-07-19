@@ -31,21 +31,23 @@ test.describe('P6 · scene flow', () => {
     expect(r.scene).toBe('INTRO');
   });
 
-  test('taking a hit forfeits the no-hit bonus (neg. control)', async ({ page }) => {
+  test('Normal grants the end-of-level heart even after taking a hit (unconditional)', async ({ page }) => {
     await openGame(page);
     await page.evaluate(() => window.BS.freeze(true));
     const r = await page.evaluate(() => {
       window.BS.start(); window.BS.setMode('normal');
       const st = window.BS.state(); st.hero.ghost = 0; st.hero.hurt = 0; st.hitThisLevel = false; st.hp = 3;
-      window.BS.heroHurt(true);                // take a hit this level
+      window.BS.heroHurt(true);                // take a hit this level (−¼ heart)
       const hpAfterHit = st.hp;
       st.t = window.BS.CONFIG.LEVEL_TIME + 0.01; window.BS.stepFixed(1);
-      for (let k = 0; k < 3; k++) { window.BS.boss().iframe = 0; window.BS.bossHit(); }
-      return { gained: st.gainedLife, hp: st.hp, hpAfterHit };
+      const need = window.BS.boss().maxHits;
+      for (let k = 0; k < need; k++) { window.BS.boss().iframe = 0; window.BS.bossHit(); }
+      return { gained: st.gainedLife, hpAfterHit, hpAfterClear: st.hp, levelHearts: st.levelHearts };
     });
-    expect(r.hpAfterHit).toBeCloseTo(2.75, 5); // hit chipped a heart
-    expect(r.gained).toBe(false);              // and forfeited the bonus
-    expect(r.hp).toBeCloseTo(2.75, 5);         // no +1 heart awarded
+    expect(r.hpAfterHit).toBeCloseTo(2.75, 5);   // hit still chips a heart
+    expect(r.gained).toBe(true);                 // heart is unconditional in Easy/Normal now
+    expect(r.levelHearts).toBe(1);
+    expect(r.hpAfterClear).toBeCloseTo(3.75, 5); // 2.75 + 1 (the earned heart)
   });
 
   test('E2E: losing all health ends in GAME OVER', async ({ page }) => {
