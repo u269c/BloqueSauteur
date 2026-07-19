@@ -30,12 +30,17 @@ test.describe('PR3 · save slots', () => {
     expect(r[2]).toBeNull();   // untouched slot stays empty
   });
 
-  test('deleting a slot clears it', async ({ page }) => {
+  test('deleting a slot needs confirmation: first click arms, second clears it', async ({ page }) => {
     await openGame(page);
     await enterPlayPanel(page, 0);
     await page.evaluate(() => { window.BS.state().owned.shield = true; window.BS.Save.save(); });
     expect(await page.evaluate(() => !!window.BS.Save.slot(0))).toBe(true);
-    await page.locator('#slots .slot-card').first().locator('.slot-del').click();
+    const del = page.locator('#slots .slot-card').first().locator('.slot-del');
+    await del.click();                                       // first click only arms
+    await expect(del).toHaveClass(/confirm/);
+    await expect(del).toHaveText('Delete?');
+    expect(await page.evaluate(() => !!window.BS.Save.slot(0))).toBe(true);   // neg. control: NOT deleted yet
+    await del.click();                                       // second click confirms
     expect(await page.evaluate(() => window.BS.Save.slot(0))).toBeNull();
     await expect(page.locator('#slots .slot-card').first()).toContainText('Empty');
   });

@@ -123,6 +123,7 @@
   .slot-card .acq-none { font-size:min(2.6vmin,10px); color:#7a8a90; font-style:italic; }
   .slot-card .slot-del { position:absolute; top:5px; right:7px; color:#93a1a1; font-size:min(3.4vmin,15px); background:none; border:none; cursor:pointer; }
   .slot-card .slot-del:hover { color:#e0392f; }
+  .slot-card .slot-del.confirm { color:#fff; background:#e0392f; border-radius:4px; padding:1px 6px; font-size:min(2.8vmin,11px); font-weight:700; }
 
   /* Merchant shop */
   .shop-bubble { background:#faf3e0; color:#2a2320; border:3px solid #2a2320; border-radius:18px; padding:3vmin; max-width:min(92vw,520px); box-shadow:0 6px 0 rgba(0,0,0,0.3); }
@@ -801,7 +802,16 @@ function buildSlots() {
     if (s) card.appendChild(acquiredIcons(s.owned));         // show what's been acquired
     if (s) {
       const del = document.createElement('button'); del.className = 'slot-del'; del.textContent = '✕'; del.setAttribute('aria-label', 'delete slot ' + (i + 1));
-      del.addEventListener('click', (e) => { e.stopPropagation(); e.preventDefault(); Save.del(i); buildSlots(); });
+      let armed = false, armT = null;
+      del.addEventListener('click', (e) => {
+        e.stopPropagation(); e.preventDefault();
+        if (!armed) {                            // first click arms — ask before wiping the save
+          armed = true; del.textContent = 'Delete?'; del.classList.add('confirm'); del.setAttribute('aria-label', 'confirm delete slot ' + (i + 1));
+          clearTimeout(armT); armT = setTimeout(() => { armed = false; del.textContent = '✕'; del.classList.remove('confirm'); }, 3000);
+          return;
+        }
+        clearTimeout(armT); Save.del(i); buildSlots();   // second click confirms
+      });
       card.appendChild(del);
     }
     card.addEventListener('click', (e) => { e.preventDefault(); onFirstGesture(); selectSlot(i); });
