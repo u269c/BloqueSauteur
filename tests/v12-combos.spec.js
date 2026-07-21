@@ -59,7 +59,7 @@ test.describe('v1.2 · combos', () => {
 
   test('landing during play zeroes the combo (integration)', async ({ page }) => {
     const r = await page.evaluate(() => {
-      window.BS.start(); window.BS.reseed(1); window.BS.setLevel(1);
+      window.BS.start(); window.BS.reseed(1); window.BS.setupArena(1);
       const st = window.BS.state(); const h = window.BS.hero();
       h.onGround = false; st.combo = 3;
       // put the hero on the ground and step: the loop should reset the combo on landing
