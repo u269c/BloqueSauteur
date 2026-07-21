@@ -278,12 +278,15 @@ const LEVELS = {
 const LAST_LEVEL = 5;
 // v2.0 side-scroll: per-level count of holes + one-way jump-up floats along the run
 // (scaled up with the level). Also how many enemies to pre-place.
+// Hole counts are tuned so total level WIDTH is ~5x the original draft (the fixed
+// entrance/exit pads don't scale, so this isn't a plain 5x of the hole count).
+// Enemies are 7x the original per-level count, distributed along the run.
 const TRAVERSE = {
-  1: { holes: 4,  floats: 3,  enemies: 3 },
-  2: { holes: 6,  floats: 5,  enemies: 5 },
-  3: { holes: 9,  floats: 8,  enemies: 7 },
-  4: { holes: 12, floats: 11, enemies: 9 },
-  5: { holes: 15, floats: 13, enemies: 12 },
+  1: { holes: 35, floats: 30, enemies: 21 },
+  2: { holes: 46, floats: 40, enemies: 35 },
+  3: { holes: 60, floats: 51, enemies: 49 },
+  4: { holes: 76, floats: 65, enemies: 63 },
+  5: { holes: 90, floats: 77, enemies: 84 },
 };
 // Boss arena (the single-screen duel at the level's end): exact holes + spawn boxes.
 const ARENA = {
@@ -624,12 +627,18 @@ function genLevel(level, seed) {
     }
     x += hw;
     const gw = (4 + Math.floor(rand() * 5)) * T;           // 4-8 tile ground run
-    if (enemies.length < p.enemies) enemies.push({ x: Math.round(x + gw / 2), type: roster[Math.floor(rand() * roster.length)] });
     ground.push({ x0: x, x1: x + gw, top }); x += gw;
   }
   const EXIT = Math.round(C.W * 0.5);
   const exitX = x + 2 * T;
   ground.push({ x0: x, x1: x + EXIT, top }); x += EXIT;    // solid exit pad → boss arena
+  // Distribute the enemies across the interior ground runs (skip the entrance + exit pads),
+  // several per run when the count is high — so all `p.enemies` fit on a long level.
+  const mid = ground.slice(1, -1).length ? ground.slice(1, -1) : ground;
+  for (let i = 0; i < p.enemies; i++) {
+    const g = mid[i % mid.length], span = Math.max(1, (g.x1 - g.x0) - 12);
+    enemies.push({ x: Math.round(g.x0 + 6 + rand() * span), type: roster[Math.floor(rand() * roster.length)] });
+  }
   return { level, seed: seed >>> 0, traverse: true, ground, floats, enemies, width: x, exitX, top, baseTop: top, x0: 0, x1: x, colW: T };
 }
 const genArena = genTerrain;   // the boss arena is the classic single-screen terrain
@@ -1587,6 +1596,8 @@ function updateEnemies(dt) {
     // despawn: fell into the hazard, or walked off the world bounds
     const leftB = (ter.traverse ? 0 : C.PLAT_X0) - e.r - 2, rightB = (ter.traverse ? ter.width : C.PLAT_X1) + e.r + 2;
     if (e.y >= C.LAVA_Y || e.x < leftB || e.x > rightB) e.alive = false;
+    // …and cull patrol enemies once they scroll well behind the camera (keeps the live set small)
+    if (e.patrol && Game.phase === 'traverse' && e.x < Game.cam.x - e.r - 60) e.alive = false;
 
     // hero interaction (skipped while ghostly or dodging — untouchable)
     if (e.alive && h.ghost <= 0 && h.dodgeT <= 0 && !h.dead) {

@@ -102,10 +102,11 @@ test.describe('v2.0 · enemies live in the level (Phase C)', () => {
       window.BS.freeze(true); window.BS.start(); window.BS.reseed(5); window.BS.setLevel(3);
       const C = window.BS.CONFIG, lvl = window.BS.levelData(), h = window.BS.hero(); h.ghost = 1e9;
       let fell = 0, moved = false;
-      for (let seg = 0; seg <= 30; seg++) {         // scrub the camera across the level
-        h.x = Math.min(lvl.exitX - 10, (seg / 30) * lvl.exitX); h.vx = 0;
-        for (const e of window.BS.enemies()) { const x0 = e.x; }
-        for (let k = 0; k < 20; k++) window.BS.stepFixed(1);
+      // park the hero on each ground run (skip the exit pad → never trip the arena) so the
+      // camera sweeps the whole level reliably, past every pre-placed enemy.
+      for (const g of lvl.ground.slice(0, -1)) {
+        Object.assign(h, { x: (g.x0 + g.x1) / 2, y: g.top, vx: 0, vy: 0, onGround: true, dead: false });
+        for (let k = 0; k < 8; k++) window.BS.stepFixed(1);
         for (const e of window.BS.enemies()) { if (e.y >= C.LAVA_Y - 1) fell++; if (Math.abs(e.vx) > 1) moved = true; }
       }
       return { placements: lvl.enemies.length, activated: lvl.enemies.filter((e) => e.active).length, fell, moved };
