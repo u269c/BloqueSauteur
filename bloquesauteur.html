@@ -93,6 +93,14 @@
   .swatch.locked::after { content:'🔒'; position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:min(3vmin,13px); }
   .swatch.rainbow { background:linear-gradient(120deg,#e0392f,#f4d03f,#7cb342,#39a0ed,#e0348b); }
 
+  /* costume picker: a small grid of owned-costume mannequins beside the modes */
+  .costumes { display:grid; grid-template-columns:repeat(3,1fr); gap:1vmin; align-content:center; max-width:min(26vmin,120px); }
+  .costume-pick {
+    width:min(6vmin,30px); height:min(6vmin,30px); padding:1px; border-radius:6px; cursor:pointer;
+    border:2px solid rgba(255,255,255,0.18); background:rgba(255,255,255,0.05); image-rendering:pixelated;
+  }
+  .costume-pick.sel { border-color:#fff; box-shadow:0 0 0 2px #f4d03f; transform:scale(1.1); }
+
   /* mode buttons: vertical stack beside the hero */
   .modes { display:flex; flex-direction:column; gap:1.2vmin; }
   .mode-btn {
@@ -130,7 +138,7 @@
   .shop-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:1.6vmin; }
   .shop-title { font-weight:800; letter-spacing:.06em; color:#2e6b3a; font-size:min(4.6vmin,22px); }
   .shop-points { font-weight:700; color:#b58900; font-size:min(4vmin,18px); }
-  .shop-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:2vmin; }
+  .shop-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:2vmin; max-height:52vh; overflow-y:auto; padding-right:1vmin; }
   .shop-item { background:#fffaf0; border:2px solid #cdbfa0; border-radius:12px; padding:1.6vmin 1vmin; text-align:center; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:.6vmin; }
   .shop-item:hover:not(.disabled) { border-color:#2e6b3a; background:#f2fbef; }
   .shop-item canvas { image-rendering:pixelated; width:min(11vmin,52px); height:min(11vmin,52px); }
@@ -168,6 +176,7 @@
     <div class="loadout">
       <canvas id="hero-preview" width="120" height="120" aria-label="hero preview"></canvas>
       <div class="swatches" id="swatches"></div>
+      <div class="costumes" id="costumes"></div>
       <div class="modes" id="modes"></div>
     </div>
     <button class="play-btn" id="play-btn">▶ PLAY</button>
@@ -320,10 +329,28 @@ const SHOP_ITEMS = [
   { key: 'halfHeart',  name: 'Half Heart',    price: 40,  blurb: '+½ max heart (this game)' },
   { key: 'heart',      name: 'A Heart',       price: 75,  blurb: '+1 max heart (this game)' },
   { key: 'twoHearts',  name: 'Two Hearts',    price: 110, blurb: '+2 max hearts (this game)' },
-  { key: 'costume',    name: 'Striped Suit',  price: 150, blurb: 'A dapper striped costume' },
 ];
 // Which owned flags persist between games (purchases) vs reset each game (hearts).
-const PERSISTENT_ITEMS = ['shield', 'doubleJump', 'dodge', 'strongHit', 'costume'];
+const PERSISTENT_ITEMS = ['shield', 'doubleJump', 'dodge', 'strongHit'];
+
+// Costumes — purchasable patterns worn over the hero body. id 0 is the original
+// striped suit; equipped via the title loadout. Owned set persists per slot.
+const COSTUMES = [
+  { id: 0,  name: 'Striped Suit',  price: 150 },
+  { id: 1,  name: 'Polka Dots',    price: 60  },
+  { id: 2,  name: 'Plus Signs',    price: 70  },
+  { id: 3,  name: 'Oblique Lines', price: 55  },
+  { id: 4,  name: 'Tic-Tac-Toe',   price: 90  },
+  { id: 5,  name: 'Camo',          price: 110 },
+  { id: 6,  name: 'Bullseye',      price: 120 },
+  { id: 7,  name: 'Spirals',       price: 100 },
+  { id: 8,  name: 'Checkers',      price: 80  },
+  { id: 9,  name: 'Dot Grid',      price: 130 },
+  { id: 10, name: 'Diagonal Camo', price: 150 },
+  { id: 11, name: 'Target Spiral', price: 170 },
+  { id: 12, name: 'Confetti',      price: 200 },
+];
+const costumeKey = (id) => 'costume:' + id;
 const MERCHANT = { landY: CONFIG.PLAT_Y, descendV: 42, riseV: 260, hoverAmp: 22 };
 
 // ── MUSIC ────────────────────────────────────────────────────────
@@ -612,7 +639,7 @@ const Game = {
   best: 0,                       // best level reached (persisted)
   hitThisLevel: false,           // cleared per level; drives the no-hit +1 life bonus
   hero: {
-    x: 240, y: CONFIG.PLAT_Y, vx: 0, vy: 0, w: 12, h: 16, face: 1, colorIdx: 0,
+    x: 240, y: CONFIG.PLAT_Y, vx: 0, vy: 0, w: 12, h: 16, face: 1, colorIdx: 0, costumeIdx: -1,
     onGround: true, coyote: 0, jumpBuf: 0, jumping: false,
     hurt: 0,        // hurt-invulnerability timer (i-frames)
     knock: 0,       // control-lock during knockback
@@ -628,11 +655,11 @@ const Game = {
 // ── Persistence (localStorage) ────────────────────────────────────
 // A slot keeps PURCHASED skills/costume + prefs; points & hearts are per-game
 // (not persisted). Muted is global. SAVE_VERSION bump wipes old saves.
-const SAVE_VERSION = 2;
+const SAVE_VERSION = 3;   // v2.0: costumes moved from a boolean to an owned-set + equipped idx
 // All shop "owned" flags, cleared. Persistent skills + per-run hearts/costume in one shape.
-function blankOwned() { return { shield: false, doubleJump: false, dodge: false, strongHit: false, heart: false, twoHearts: false, halfHeart: false, costume: false }; }
+function blankOwned() { return { shield: false, doubleJump: false, dodge: false, strongHit: false, heart: false, twoHearts: false, halfHeart: false, costumes: [] }; }
 function freshSlot() {
-  return { owned: { shield: false, doubleJump: false, dodge: false, strongHit: false, costume: false }, rainbowUnlocked: false, colorIdx: 0, mode: 'normal', best: 0 };
+  return { owned: { shield: false, doubleJump: false, dodge: false, strongHit: false, costumes: [] }, costumeIdx: -1, rainbowUnlocked: false, colorIdx: 0, mode: 'normal', best: 0 };
 }
 const Save = {
   KEY: 'bloquesauteur.save',
@@ -653,12 +680,14 @@ const Save = {
     const s = this.data.slots[i];
     Game.owned = blankOwned();
     for (const k of PERSISTENT_ITEMS) Game.owned[k] = !!(s.owned && s.owned[k]);
+    Game.owned.costumes = (s.owned && Array.isArray(s.owned.costumes)) ? s.owned.costumes.slice() : [];
     Game.points = 0; Game.heartsBought = 0;          // per-game — start fresh
     Game.rainbowUnlocked = !!s.rainbowUnlocked;
     Game.best = s.best | 0;
     Game.mode = MODES[s.mode] ? s.mode : 'normal';
     Game.hero.colorIdx = Number.isInteger(s.colorIdx) ? s.colorIdx : 0;
     if (PALETTE[Game.hero.colorIdx] && PALETTE[Game.hero.colorIdx].rainbow && !Game.rainbowUnlocked) Game.hero.colorIdx = 0;
+    Game.hero.costumeIdx = (Number.isInteger(s.costumeIdx) && Game.owned.costumes.includes(s.costumeIdx)) ? s.costumeIdx : -1;
     this.save();
   },
   // Write only PERSISTENT progress back into the active slot + persist.
@@ -666,8 +695,9 @@ const Save = {
     const i = this.data.activeSlot;
     if (i != null) {
       const owned = {}; for (const k of PERSISTENT_ITEMS) owned[k] = !!(Game.owned && Game.owned[k]);
+      owned.costumes = (Game.owned && Array.isArray(Game.owned.costumes)) ? Game.owned.costumes.slice() : [];
       this.data.slots[i] = {
-        owned, rainbowUnlocked: !!Game.rainbowUnlocked, colorIdx: Game.hero.colorIdx, mode: Game.mode, best: Game.best | 0,
+        owned, costumeIdx: Game.hero.costumeIdx, rainbowUnlocked: !!Game.rainbowUnlocked, colorIdx: Game.hero.colorIdx, mode: Game.mode, best: Game.best | 0,
       };
     }
     this.data.muted = Audio.muted;
@@ -831,6 +861,23 @@ function buildModes() {
   }
 }
 
+// Costume picker: "None" (plain T) plus every owned costume. Selecting equips it.
+function buildCostumes() {
+  const box = document.getElementById('costumes'); if (!box) return;
+  box.innerHTML = '';
+  const opts = [-1].concat(COSTUMES.filter((c) => Game.owned.costumes.includes(c.id)).map((c) => c.id));
+  for (const id of opts) {
+    const b = document.createElement('canvas'); b.width = 24; b.height = 24;
+    b.className = 'costume-pick' + (id === Game.hero.costumeIdx ? ' sel' : '');
+    b.title = id < 0 ? 'No costume' : (COSTUMES.find((c) => c.id === id) || {}).name;
+    const g = b.getContext('2d'); g.imageSmoothingEnabled = false;
+    if (id < 0) { g.fillStyle = '#0a0a0a'; g.fillRect(5, 3, 14, 18); g.fillStyle = '#39a0ed'; g.fillRect(7, 5, 10, 3); g.fillRect(11, 5, 3, 12); }   // plain "T"
+    else { g.fillStyle = '#0a0a0a'; g.fillRect(5, 3, 14, 18); drawCostume(g, 5, 3, 14, 18, id, '#39a0ed'); }
+    b.addEventListener('click', (e) => { e.preventDefault(); onFirstGesture(); Game.hero.costumeIdx = id; Save.save(); buildCostumes(); drawHeroPreview(); });
+    box.appendChild(b);
+  }
+}
+
 // ── Save-slot menu ──
 // A small row of icons for the acquired (persistent) items in a slot.
 function acquiredIcons(owned) {
@@ -838,6 +885,9 @@ function acquiredIcons(owned) {
   let any = false;
   for (const k of PERSISTENT_ITEMS) {
     if (owned && owned[k]) { any = true; const cv = document.createElement('canvas'); cv.width = 32; cv.height = 32; drawShopIcon(cv.getContext('2d'), k); row.appendChild(cv); }
+  }
+  if (owned && Array.isArray(owned.costumes) && owned.costumes.length) {   // one icon for owned costumes
+    any = true; const cv = document.createElement('canvas'); cv.width = 32; cv.height = 32; drawShopIcon(cv.getContext('2d'), costumeKey(owned.costumes[0])); row.appendChild(cv);
   }
   if (!any) { const em = document.createElement('span'); em.className = 'acq-none'; em.textContent = 'no items yet'; row.appendChild(em); }
   return row;
@@ -874,12 +924,12 @@ function buildSlots() {
 // Select a slot: load it and refresh the whole single-screen loadout.
 function selectSlot(i) {
   Save.select(i);
-  buildSlots(); buildSwatches(); buildModes(); drawHeroPreview();
+  buildSlots(); buildSwatches(); buildCostumes(); buildModes(); drawHeroPreview();
 }
 // Title is one screen now: ensure a slot is active, then draw everything.
 function showTitlePanel() {
   if (Save.data.activeSlot == null) Save.select(0);
-  buildSlots(); buildSwatches(); buildModes(); drawHeroPreview();
+  buildSlots(); buildSwatches(); buildCostumes(); buildModes(); drawHeroPreview();
 }
 
 function drawHeroPreview() {
@@ -892,8 +942,8 @@ function drawHeroPreview() {
   const x = 9, y = 6, w = 12, h = 16;
   c.fillStyle = '#0a0a0a'; c.fillRect(x + 1, y + h - 2, 3, 4); c.fillRect(x + w - 4, y + h - 2, 3, 4);   // legs
   c.fillRect(x, y, w, h - 2);                     // body
-  if (Game.owned && Game.owned.costume) {          // striped suit
-    for (let sx = 2; sx < w - 2; sx += 3) { c.fillStyle = ((sx >> 1) & 1) ? col : '#eee8d5'; c.fillRect(x + sx, y + 2, 2, h - 6); }
+  if (Game.hero.costumeIdx >= 0) {                 // equipped costume pattern
+    drawCostume(c, x, y, w, h, Game.hero.costumeIdx, col);
   } else {
     c.fillStyle = col; c.fillRect(x + 2, y + 2, w - 4, 3); c.fillRect(x + (w >> 1) - 1, y + 2, 3, h - 8);
   }
@@ -912,6 +962,13 @@ function drawHeroPreview() {
 function drawShopIcon(c, key) {
   c.clearRect(0, 0, 32, 32); c.lineWidth = 2; c.lineJoin = 'round';
   const heart = (cx, cy, s, col) => { c.fillStyle = col; c.fillRect(cx - 3 * s, cy - 2 * s, 2 * s, 1 * s); c.fillRect(cx + s, cy - 2 * s, 2 * s, 1 * s); c.fillRect(cx - 3 * s, cy - s, 6 * s, 2 * s); c.fillRect(cx - 2 * s, cy + s, 4 * s, 1 * s); c.fillRect(cx - s, cy + 2 * s, 2 * s, 1 * s); };
+  if (typeof key === 'string' && key.startsWith('costume:')) {   // costume mannequin
+    const id = +key.slice(8);
+    c.fillStyle = '#0a0a0a'; c.fillRect(3, 6, 5, 9); c.fillRect(24, 6, 5, 9);   // sleeves
+    c.fillStyle = '#0a0a0a'; c.fillRect(6, 4, 20, 26);                          // body frame
+    drawCostume(c, 6, 4, 20, 26, id, '#39a0ed');
+    return;
+  }
   switch (key) {
     case 'shield':
       c.fillStyle = '#8a909b'; c.beginPath(); c.moveTo(16, 4); c.lineTo(27, 9); c.lineTo(24, 24); c.lineTo(16, 29); c.lineTo(8, 24); c.lineTo(5, 9); c.closePath(); c.fill();
@@ -938,30 +995,38 @@ function drawShopIcon(c, key) {
       c.save(); c.beginPath(); c.rect(16, 6, 12, 20); c.clip(); heart(16, 15, 2, 'rgba(255,255,255,0.22)'); c.restore();
       break;
     case 'twoHearts': heart(11, 13, 1.6, '#e0392f'); heart(21, 18, 1.6, '#e0392f'); break;
-    case 'costume':
-      c.fillStyle = '#3a3f48'; c.fillRect(8, 8, 16, 18);
-      c.fillStyle = '#f4d03f'; for (let sx = 9; sx < 24; sx += 4) c.fillRect(sx, 8, 2, 18);
-      c.fillStyle = '#3a3f48'; c.fillRect(5, 8, 5, 6); c.fillRect(22, 8, 5, 6);   // sleeves
-      break;
   }
 }
+// A costume id if `key` is a costume key ('costume:N'), else null.
+function costumeIdOf(key) { return (typeof key === 'string' && key.startsWith('costume:')) ? +key.slice(8) : null; }
+function itemOwned(key) { const cid = costumeIdOf(key); return cid != null ? Game.owned.costumes.includes(cid) : !!Game.owned[key]; }
+// The full shop catalogue: skills/hearts + every costume.
+function shopCatalogue() {
+  return SHOP_ITEMS.concat(COSTUMES.map((c) => ({ key: costumeKey(c.id), name: c.name, price: c.price, blurb: 'Costume: ' + c.name })));
+}
 function buyItem(key) {
-  const item = SHOP_ITEMS.find((i) => i.key === key); if (!item) return;
-  if (Game.owned[key] || Game.points < item.price) return;
-  Game.points -= item.price; Game.owned[key] = true;
-  // A bought heart raises the max AND heals by that same amount only (not a full refill).
-  if (key === 'halfHeart') { Game.heartsBought += 0.5; Game.hp = Math.min(maxHearts(), Game.hp + 0.5); }
-  if (key === 'heart') { Game.heartsBought += 1; Game.hp = Math.min(maxHearts(), Game.hp + 1); }
-  if (key === 'twoHearts') { Game.heartsBought += 2; Game.hp = Math.min(maxHearts(), Game.hp + 2); }
+  const item = shopCatalogue().find((i) => i.key === key); if (!item) return;
+  if (itemOwned(key) || Game.points < item.price) return;
+  Game.points -= item.price;
+  const cid = costumeIdOf(key);
+  if (cid != null) { Game.owned.costumes.push(cid); Game.hero.costumeIdx = cid; }   // auto-equip on buy
+  else {
+    Game.owned[key] = true;
+    // A bought heart raises the max AND heals by that same amount only (not a full refill).
+    if (key === 'halfHeart') { Game.heartsBought += 0.5; Game.hp = Math.min(maxHearts(), Game.hp + 0.5); }
+    if (key === 'heart') { Game.heartsBought += 1; Game.hp = Math.min(maxHearts(), Game.hp + 1); }
+    if (key === 'twoHearts') { Game.heartsBought += 2; Game.hp = Math.min(maxHearts(), Game.hp + 2); }
+  }
   if (Game.merchant) Game.merchant.bought = true;
   Audio.sfx('buy'); Save.save(); buildShop();
+  if (cid != null) buildCostumes();
 }
 function buildShop() {
   const grid = document.getElementById('shop-grid'); if (!grid) return;
   const pts = document.getElementById('shop-points'); if (pts) pts.textContent = Game.points + ' pts';
   grid.innerHTML = '';
-  for (const item of SHOP_ITEMS) {
-    const owned = !!Game.owned[item.key], poor = !owned && Game.points < item.price;
+  for (const item of shopCatalogue()) {
+    const owned = itemOwned(item.key), poor = !owned && Game.points < item.price;
     const cell = document.createElement('div');
     cell.className = 'shop-item' + (owned ? ' owned' : '') + (poor ? ' poor' : '');
     cell.dataset.key = item.key;
@@ -1866,6 +1931,68 @@ function drawArmKnife(c, ax, ay, dir) {
   c.fillStyle = '#d7dde4'; c.fillRect(hand, ay - 6, 2, 5);                           // blade pointing up
 }
 
+// Paint an owned costume pattern over the hero body interior (x,y = body top-left,
+// w,h = body size). `col` is the equipped hero colour; patterns mix it with accents.
+// Deterministic (no per-frame randomness) so it doesn't shimmer.
+const CONFETTI_COLS = ['#e0392f', '#f4d03f', '#39a0ed', '#7cb342', '#e0348b', '#e8731e'];
+function drawCostume(c, x, y, w, h, id, col) {
+  const ix = x + 2, iy = y + 2, iw = w - 4, ih = h - 6, cx = ix + iw / 2, cy = iy + ih / 2;
+  const cream = '#eee8d5', dark = '#20242c';
+  const hash = (a, b) => { const s = Math.sin(a * 12.9898 + b * 78.233) * 43758.5453; return s - Math.floor(s); };
+  c.save();
+  c.beginPath(); c.rect(ix, iy, iw, ih); c.clip();
+  c.fillStyle = cream; c.fillRect(ix, iy, iw, ih);        // default base (patterns override)
+  switch (id) {
+    case 0:  // striped suit
+      for (let sx = 0; sx < iw; sx += 3) { c.fillStyle = (((sx / 1.5) | 0) & 1) ? col : cream; c.fillRect(ix + sx, iy, 2, ih); }
+      break;
+    case 1:  // polka dots
+      c.fillStyle = col; for (let gy = 0; gy < ih; gy += 3) for (let gx = (((gy / 3) | 0) & 1) ? 1.5 : 0; gx < iw; gx += 3) c.fillRect(ix + gx, iy + gy, 1.4, 1.4);
+      break;
+    case 2:  // plus signs
+      c.fillStyle = col; for (let gy = 1; gy < ih; gy += 4) for (let gx = 1; gx < iw; gx += 4) { c.fillRect(ix + gx, iy + gy - 1, 1, 3); c.fillRect(ix + gx - 1, iy + gy, 3, 1); }
+      break;
+    case 3:  // oblique lines
+      c.fillStyle = col; for (let k = -ih; k < iw; k += 3) for (let t = 0; t < ih; t++) c.fillRect(ix + k + t, iy + t, 1.4, 1);
+      break;
+    case 4:  // tic-tac-toe grid
+      c.fillStyle = col; c.fillRect(ix + iw / 3, iy, 1, ih); c.fillRect(ix + 2 * iw / 3, iy, 1, ih); c.fillRect(ix, iy + ih / 3, iw, 1); c.fillRect(ix, iy + 2 * ih / 3, iw, 1);
+      break;
+    case 5:  // camo
+      c.fillStyle = col; c.fillRect(ix, iy, iw, ih);
+      for (let gy = 0; gy < ih; gy += 2) for (let gx = 0; gx < iw; gx += 2) { const v = hash(gx, gy); if (v > 0.62) { c.fillStyle = dark; c.fillRect(ix + gx, iy + gy, 2.4, 2.4); } else if (v < 0.24) { c.fillStyle = cream; c.fillRect(ix + gx, iy + gy, 2.4, 2.4); } }
+      break;
+    case 6:  // bullseye
+      for (let r = Math.max(iw, ih) / 2; r > 0; r -= 1.6) { c.fillStyle = (((r / 1.6) | 0) & 1) ? col : cream; c.beginPath(); c.arc(cx, cy, r, 0, 7); c.fill(); }
+      break;
+    case 7:  // spirals (pinwheel of arms)
+      c.fillStyle = col; c.strokeStyle = col; c.lineWidth = 1;
+      for (let a = 0; a < 6.28; a += 0.5) { const r = a / 6.28 * (iw / 2 + 1); c.fillRect(cx + Math.cos(a) * r - 0.7, cy + Math.sin(a) * r - 0.7, 1.4, 1.4); }
+      break;
+    case 8:  // checkers
+      for (let gy = 0; gy < ih; gy += 2) for (let gx = 0; gx < iw; gx += 2) { c.fillStyle = ((((gx / 2) | 0) + ((gy / 2) | 0)) & 1) ? col : cream; c.fillRect(ix + gx, iy + gy, 2, 2); }
+      break;
+    case 9:  // dot grid (inverse polka — colour base, cream dots)
+      c.fillStyle = col; c.fillRect(ix, iy, iw, ih);
+      c.fillStyle = cream; for (let gy = 0; gy < ih; gy += 3) for (let gx = (((gy / 3) | 0) & 1) ? 1.5 : 0; gx < iw; gx += 3) c.fillRect(ix + gx, iy + gy, 1.4, 1.4);
+      break;
+    case 10: // diagonal camo (three-shade diagonal bands)
+      for (let k = -ih; k < iw + ih; k += 3) { const band = ((k / 3) | 0) % 3; c.fillStyle = band === 0 ? col : band === 1 ? dark : cream; for (let t = 0; t < ih; t++) c.fillRect(ix + k - t, iy + t, 3, 1); }
+      break;
+    case 11: // target spiral (rings + a spiral overlay + centre)
+      for (let r = Math.max(iw, ih) / 2; r > 0; r -= 2) { c.fillStyle = (((r / 2) | 0) & 1) ? col : cream; c.beginPath(); c.arc(cx, cy, r, 0, 7); c.fill(); }
+      c.fillStyle = dark; for (let a = 0; a < 9.4; a += 0.4) { const r = a / 9.4 * (iw / 2); c.fillRect(cx + Math.cos(a) * r - 0.5, cy + Math.sin(a) * r - 0.5, 1, 1); }
+      break;
+    case 12: // confetti (dark base, multicolour flecks)
+      c.fillStyle = dark; c.fillRect(ix, iy, iw, ih);
+      for (let gy = 0; gy < ih; gy += 2) for (let gx = 0; gx < iw; gx += 2) { c.fillStyle = CONFETTI_COLS[(hash(gx, gy) * CONFETTI_COLS.length) | 0]; c.fillRect(ix + gx + hash(gy, gx), iy + gy, 1.4, 1.4); }
+      break;
+    default: // fallback: plain colour block
+      c.fillStyle = col; c.fillRect(ix, iy, iw, ih);
+  }
+  c.restore();
+}
+
 function drawHero() {
   const h = Game.hero, C = CONFIG;
   const tremble = h.frozen > 0 ? Math.round((Math.random() * 2 - 1) * 1.5) : 0;   // scream-freeze shiver
@@ -1890,8 +2017,8 @@ function drawHero() {
   ctx.fillStyle = '#0a0a0a';
   ctx.fillRect(x, y, h.w, h.h - 2);
   const col = heroColor(h);
-  if (Game.owned.costume) {                                    // striped suit
-    for (let sx = 2; sx < h.w - 2; sx += 3) { ctx.fillStyle = ((sx >> 1) & 1) ? col : '#eee8d5'; ctx.fillRect(x + sx, y + 2, 2, h.h - 6); }
+  if (h.costumeIdx >= 0) {                                      // equipped costume pattern
+    drawCostume(ctx, x, y, h.w, h.h, h.costumeIdx, col);
   } else {                                                     // interior "T" from the concept art
     ctx.fillStyle = col;
     ctx.fillRect(x + 2, y + 2, h.w - 4, 3);                     // top bar
@@ -2266,7 +2393,10 @@ window.BS = {
   startGame,                 // real title→intro flow
   gotoPlay, tapAdvance, gotoTitle, gotoShop, closeShop,
   merchant: () => Game.merchant,
-  SHOP_ITEMS, buyItem, buildShop,
+  SHOP_ITEMS, COSTUMES, buyItem, buildShop, buildCostumes,
+  costumes: () => Game.owned.costumes,
+  costumeIdx: () => Game.hero.costumeIdx,
+  equipCostume: (id) => { Game.hero.costumeIdx = id; Save.save(); },
   pause: togglePause,
   isPaused: () => Game.paused,
   buildSwatches,

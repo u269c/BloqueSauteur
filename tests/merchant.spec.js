@@ -24,7 +24,8 @@ test('merchant appears after the boss and opens the shop', async ({ page }) => {
   expect(await page.evaluate(() => window.BS.scene())).toBe('SHOP');
   expect(await page.evaluate(() => !!window.BS.merchant())).toBe(true);
   await expect(page.locator('#shop')).toBeVisible();
-  await expect(page.locator('#shop-grid .shop-item')).toHaveCount(8);   // 8 items
+  const expected = await page.evaluate(() => window.BS.SHOP_ITEMS.length + window.BS.COSTUMES.length);
+  await expect(page.locator('#shop-grid .shop-item')).toHaveCount(expected);   // skills/hearts + costumes
 });
 
 test('buying deducts points, marks owned, greys out, and persists', async ({ page }) => {
