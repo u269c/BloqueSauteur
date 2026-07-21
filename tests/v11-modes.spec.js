@@ -46,7 +46,8 @@ test.describe('v1.1 · holdable dodge', () => {
 test.describe('v1.1 · per-mode spawn speed', () => {
   test('RAGE spawns fastest, then NORMAL, then EASY', async ({ page }) => {
     const interval = async (mode) => page.evaluate((mode) => {
-      window.BS.start(); window.BS.reseed(1); window.BS.setLevel(1); window.BS.setMode(mode);
+      window.BS.start(); window.BS.reseed(1); window.BS.setLevel(3); window.BS.setMode(mode);
+      window.BS.enterArena();          // arena boxes (L3 has one) drive the spawn cadence now
       const st = window.BS.state(); st.enemies.length = 0; st.hero.ghost = 1e9; st.spawnT = 0;
       window.BS.stepFixed(1);          // triggers a spawn → resets spawnT to the mode's interval
       return st.spawnT;
@@ -65,7 +66,7 @@ test.describe('v1.1 · end-of-level heart (Easy/Normal)', () => {
       window.BS.start(); window.BS.setMode(mode);
       const st = window.BS.state(); st.hero.ghost = 1e9; st.levelHearts = 0; st.heartAnim = null;
       const hp0 = st.hp;
-      st.t = window.BS.CONFIG.LEVEL_TIME + 0.01; window.BS.stepFixed(1);
+      window.BS.enterArena();
       const need = window.BS.boss().maxHits;
       for (let k = 0; k < need; k++) { window.BS.boss().iframe = 0; window.BS.bossHit(); }
       return { levelHearts: st.levelHearts, hpDelta: st.hp - hp0, anim: !!st.heartAnim, gained: st.gainedLife };

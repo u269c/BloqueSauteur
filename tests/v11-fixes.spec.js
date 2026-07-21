@@ -7,7 +7,7 @@ test.describe('v1.1 · respawn away from holes', () => {
   test('respawn lands in the widest solid segment (solid ground on both sides)', async ({ page }) => {
     await openGame(page);
     const r = await page.evaluate(() => {
-      window.BS.freeze(true); window.BS.start(); window.BS.reseed(1); window.BS.setLevel(1);
+      window.BS.freeze(true); window.BS.start(); window.BS.reseed(1); window.BS.setupArena(1);
       const C = window.BS.CONFIG, T = C.TILE, t = window.BS.terrain();
       for (let i = 0; i < t.nCols; i++) t.cols[i] = C.PLAT_Y;
       // narrow ledge on the left (cols 0-2), big platform on the right (cols 6-21)

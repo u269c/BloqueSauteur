@@ -12,7 +12,7 @@ test.describe('P6 · scene flow', () => {
       window.BS.setMode('normal');
       const st = window.BS.state(); st.hero.ghost = 1e9; st.hitThisLevel = false;   // survive untouched
       const hp0 = st.hp;
-      st.t = window.BS.CONFIG.LEVEL_TIME + 0.01; window.BS.stepFixed(1);            // boss emerges
+      window.BS.enterArena();            // boss emerges
       const bossType = window.BS.boss() && window.BS.boss().type;
       for (let k = 0; k < 3; k++) { window.BS.boss().iframe = 0; window.BS.bossHit(); }
       const sceneClear = st.scene, gained = st.gainedLife, hpAfter = st.hp;
@@ -39,7 +39,7 @@ test.describe('P6 · scene flow', () => {
       const st = window.BS.state(); st.hero.ghost = 0; st.hero.hurt = 0; st.hitThisLevel = false; st.hp = 3;
       window.BS.heroHurt(true);                // take a hit this level (−¼ heart)
       const hpAfterHit = st.hp;
-      st.t = window.BS.CONFIG.LEVEL_TIME + 0.01; window.BS.stepFixed(1);
+      window.BS.enterArena();
       const need = window.BS.boss().maxHits;
       for (let k = 0; k < need; k++) { window.BS.boss().iframe = 0; window.BS.bossHit(); }
       return { gained: st.gainedLife, hpAfterHit, hpAfterClear: st.hp, levelHearts: st.levelHearts };
@@ -54,7 +54,7 @@ test.describe('P6 · scene flow', () => {
     await openGame(page);
     await page.evaluate(() => window.BS.freeze(true));
     const r = await page.evaluate(() => {
-      window.BS.start(); const st = window.BS.state(); st.hp = 3;
+      window.BS.start(); window.BS.setupArena(1); const st = window.BS.state(); st.hp = 3;
       const C = window.BS.CONFIG, h = window.BS.hero();
       for (let d = 0; d < 3 && st.scene === 'PLAY'; d++) {           // three fatal lava falls (−1 heart each)
         Object.assign(h, { x: C.PLAT_X0 - 30, y: C.LAVA_Y + 1, vx: 0, vy: 0, ghost: 0, hurt: 0, dead: false, onGround: false });
@@ -72,7 +72,7 @@ test.describe('P6 · scene flow', () => {
     const r = await page.evaluate(() => {
       window.BS.start(); window.BS.setMode('normal'); const st = window.BS.state();
       st.level = window.BS.LAST_LEVEL; window.BS.setLevel(window.BS.LAST_LEVEL); st.hero.ghost = 1e9;
-      st.t = window.BS.CONFIG.LEVEL_TIME + 0.01; window.BS.stepFixed(1);
+      window.BS.enterArena();
       // volcano boss has 2 lives; keep hitting through both.
       let guard = 0;
       while (window.BS.boss() && guard++ < 60) { window.BS.boss().iframe = 0; window.BS.bossHit(); }
@@ -182,7 +182,7 @@ test.describe('P6 · determinism & seed', () => {
       window.BS.gotoTitle();  const title = window.BS.musicKey();
       window.BS.startGame();  const lvl = window.BS.musicKey();       // title → intro starts level-1 music
       const st = window.BS.state();
-      window.BS.gotoPlay(); st.t = window.BS.CONFIG.LEVEL_TIME + 0.01; window.BS.stepFixed(1);
+      window.BS.gotoPlay(); window.BS.enterArena();
       const boss = window.BS.musicKey();                              // boss emergence swaps to boss music
       return { title, lvl, boss };
     });

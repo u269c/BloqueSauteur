@@ -8,7 +8,7 @@ async function toShop(page, points) {
   await page.evaluate((points) => {
     window.BS.freeze(true); window.BS.start(); window.BS.setMode('normal');
     const st = window.BS.state(); st.hero.ghost = 1e9;
-    st.t = window.BS.CONFIG.LEVEL_TIME + 0.01; window.BS.stepFixed(1);           // boss
+    window.BS.enterArena();           // boss
     const need = window.BS.boss().maxHits; for (let k = 0; k < need; k++) { window.BS.boss().iframe = 0; window.BS.bossHit(); }
     window.BS.tapAdvance();                                                      // CLEAR → SHOP
     // land the merchant so the shop overlay opens (y past the land threshold)

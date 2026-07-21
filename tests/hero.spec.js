@@ -64,7 +64,7 @@ test.describe('P3 · variable-height jump', () => {
 test.describe('P3 · horizontal collision', () => {
   test('can clear a MAX_JUMP_GAP hole with a running jump', async ({ page }) => {
     const r = await page.evaluate(() => {
-      window.BS.start(); window.BS.reseed(1); window.BS.setLevel(1);
+      window.BS.start(); window.BS.reseed(1); window.BS.setupArena(1);
       const C = window.BS.CONFIG, T = C.TILE, t = window.BS.terrain();
       const gapCols = Math.floor(C.MAX_JUMP_GAP / T), holeStart = 8;
       for (let i = 0; i < t.nCols; i++) t.cols[i] = C.PLAT_Y;
@@ -85,7 +85,7 @@ test.describe('P3 · horizontal collision', () => {
 
   test('a tall step blocks horizontal movement (must jump over)', async ({ page }) => {
     const r = await page.evaluate(() => {
-      window.BS.start(); window.BS.reseed(1); window.BS.setLevel(1);
+      window.BS.start(); window.BS.reseed(1); window.BS.setupArena(1);
       const C = window.BS.CONFIG, T = C.TILE, t = window.BS.terrain();
       for (let i = 0; i < t.nCols; i++) t.cols[i] = C.PLAT_Y;
       for (let i = 10; i < t.nCols; i++) t.cols[i] = C.PLAT_Y - 2 * T;
@@ -104,7 +104,7 @@ test.describe('P3 · horizontal collision', () => {
 test.describe('P3 · lava death + respawn ghost', () => {
   test('falling into a hole costs exactly one life and respawns ghostly', async ({ page }) => {
     const r = await page.evaluate(() => {
-      window.BS.start(); window.BS.reseed(1); window.BS.setLevel(1);
+      window.BS.start(); window.BS.reseed(1); window.BS.setupArena(1);
       const C = window.BS.CONFIG, T = C.TILE, t = window.BS.terrain();
       for (let i = 0; i < t.nCols; i++) t.cols[i] = C.PLAT_Y;
       for (let i = 6; i < 6 + Math.floor(C.MAX_JUMP_GAP / T); i++) t.cols[i] = null;

@@ -9,19 +9,18 @@ test.beforeEach(async ({ page }) => {
 });
 
 test.describe('P5 · boss emergence', () => {
-  test('boss appears once the 60s survival timer elapses; spawns pause', async ({ page }) => {
+  test('boss appears on reaching the level exit (arena); field clears', async ({ page }) => {
     const r = await page.evaluate(() => {
-      window.BS.start(); window.BS.reseed(11); window.BS.setLevel(1);
+      window.BS.start(); window.BS.reseed(11); window.BS.setupArena(1);
       const st = window.BS.state();
-      const before = !!window.BS.boss();
-      st.t = window.BS.CONFIG.LEVEL_TIME + 0.01;   // jump to the 60s mark
-      window.BS.stepFixed(1);
+      const before = !!window.BS.boss();     // still traversing → no boss yet
+      window.BS.enterArena();                 // reach the exit → boss arena
       const after = !!window.BS.boss();
-      const bossActive = st.bossActive, enemyCount = window.BS.enemies().length;
-      return { before, after, bossActive, enemyCount, type: window.BS.boss() && window.BS.boss().type };
+      return { before, after, phase: window.BS.phase(), bossActive: st.bossActive, enemyCount: window.BS.enemies().length, type: window.BS.boss() && window.BS.boss().type };
     });
     expect(r.before).toBe(false);
     expect(r.after).toBe(true);          // boss now exists
+    expect(r.phase).toBe('boss');
     expect(r.bossActive).toBe(true);
     expect(r.enemyCount).toBe(0);        // field cleared for the duel
     expect(r.type).toBe('clear');        // L1 boss is the transparent variant
@@ -29,7 +28,7 @@ test.describe('P5 · boss emergence', () => {
 
   test('boss variant matches the level (L2 red, L3 yellow, L4 rainbow)', async ({ page }) => {
     const r = await page.evaluate(() => {
-      const variant = (lvl) => { window.BS.start(); window.BS.reseed(1); window.BS.setLevel(lvl); window.BS.activateBoss(); return window.BS.boss().type; };
+      const variant = (lvl) => { window.BS.start(); window.BS.reseed(1); window.BS.setupArena(lvl); window.BS.activateBoss(); return window.BS.boss().type; };
       return { l1: variant(1), l2: variant(2), l3: variant(3), l4: variant(4) };
     });
     expect(r).toEqual({ l1: 'clear', l2: 'red', l3: 'yellow', l4: 'rainbow' });
@@ -39,7 +38,7 @@ test.describe('P5 · boss emergence', () => {
 test.describe('P5 · three stomps to die, look flips at hit 2', () => {
   test('hits 1→2→3 progress; enraged at 2; defeat at 3 advances the level', async ({ page }) => {
     const r = await page.evaluate(() => {
-      window.BS.start(); window.BS.reseed(1); window.BS.setLevel(1);
+      window.BS.start(); window.BS.reseed(1); window.BS.setupArena(1);
       const st = window.BS.state(); st.hitThisLevel = true;   // isolate: no no-hit bonus noise
       window.BS.activateBoss();
       const b = window.BS.boss();
@@ -71,7 +70,7 @@ test.describe('P5 · three stomps to die, look flips at hit 2', () => {
 
   test('i-frames block a rapid second stomp (neg. control)', async ({ page }) => {
     const r = await page.evaluate(() => {
-      window.BS.start(); window.BS.reseed(1); window.BS.setLevel(1); window.BS.activateBoss();
+      window.BS.start(); window.BS.reseed(1); window.BS.setupArena(1); window.BS.activateBoss();
       const b = window.BS.boss();
       b.iframe = 0; window.BS.bossHit();                 // lands → hits 1, sets i-frames
       const h1 = window.BS.boss().hits;
@@ -87,7 +86,7 @@ test.describe('P5 · three stomps to die, look flips at hit 2', () => {
 test.describe('P5 · attack patterns', () => {
   test('L1 boss charges then returns (cycles through both states)', async ({ page }) => {
     const r = await page.evaluate(() => {
-      window.BS.start(); window.BS.reseed(1); window.BS.setLevel(1);
+      window.BS.start(); window.BS.reseed(1); window.BS.setupArena(1);
       const st = window.BS.state(); st.hero.ghost = 1e9;   // don't let contact interfere
       window.BS.activateBoss();
       const states = new Set(); let minX = 9999, maxX = -9999;
@@ -105,7 +104,7 @@ test.describe('P5 · attack patterns', () => {
 
   test('boss never falls into a hole/lava on a hole-heavy level (regression)', async ({ page }) => {
     const r = await page.evaluate(() => {
-      window.BS.start(); window.BS.reseed(31337); window.BS.setLevel(4);
+      window.BS.start(); window.BS.reseed(31337); window.BS.setupArena(4);
       const st = window.BS.state(); st.hero.ghost = 1e9;
       window.BS.activateBoss();
       const C = window.BS.CONFIG, base = window.BS.terrain().baseTop;
@@ -123,7 +122,7 @@ test.describe('P5 · attack patterns', () => {
 
   test('L4 rainbow boss uses a telegraph wind-up (feint capability)', async ({ page }) => {
     const r = await page.evaluate(() => {
-      window.BS.start(); window.BS.reseed(3); window.BS.setLevel(4);
+      window.BS.start(); window.BS.reseed(3); window.BS.setupArena(4);
       const st = window.BS.state(); st.hero.ghost = 1e9;
       window.BS.activateBoss();
       const states = new Set();
@@ -135,7 +134,7 @@ test.describe('P5 · attack patterns', () => {
 
   test('L1 boss does NOT telegraph (neg. control for the L4 pattern)', async ({ page }) => {
     const r = await page.evaluate(() => {
-      window.BS.start(); window.BS.reseed(3); window.BS.setLevel(1);
+      window.BS.start(); window.BS.reseed(3); window.BS.setupArena(1);
       const st = window.BS.state(); st.hero.ghost = 1e9;
       window.BS.activateBoss();
       const states = new Set();
@@ -150,7 +149,7 @@ test.describe('P5 · attack patterns', () => {
 test.describe('P5 · boss contact hurts the hero', () => {
   test('charging into the hero deals a hit (knock, no life lost)', async ({ page }) => {
     const r = await page.evaluate(() => {
-      window.BS.start(); window.BS.reseed(1); window.BS.setLevel(1); window.BS.setMode('normal');
+      window.BS.start(); window.BS.reseed(1); window.BS.setupArena(1); window.BS.setMode('normal');
       const st = window.BS.state(); st.hp = 3;
       window.BS.activateBoss();
       const b = window.BS.boss(), C = window.BS.CONFIG, h = window.BS.hero();

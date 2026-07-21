@@ -45,7 +45,7 @@ test.describe('PR1 · points scoring', () => {
 test.describe('PR1 · boss follows the platform', () => {
   test('boss rides a raised segment (not stuck at base) and never drops below base', async ({ page }) => {
     const r = await page.evaluate(() => {
-      window.BS.start(); window.BS.reseed(1); window.BS.setLevel(1);
+      window.BS.start(); window.BS.reseed(1); window.BS.setupArena(1);
       const C = window.BS.CONFIG, T = C.TILE, t = window.BS.terrain();
       for (let i = 0; i < t.nCols; i++) t.cols[i] = C.PLAT_Y;
       for (let i = 8; i < 14; i++) t.cols[i] = C.PLAT_Y - 2 * T;   // a raised plateau

@@ -27,7 +27,7 @@ test.describe('R2-B · hit damage per mode', () => {
 
   test('EASY hole/lava fall costs ½ heart (neg. control: NORMAL costs a full heart)', async ({ page }) => {
     const fall = async (mode) => page.evaluate((mode) => {
-      window.BS.start(); window.BS.reseed(1); window.BS.setLevel(1); window.BS.setMode(mode);
+      window.BS.start(); window.BS.reseed(1); window.BS.setupArena(1); window.BS.setMode(mode);
       const st = window.BS.state(), C = window.BS.CONFIG, h = window.BS.hero();
       st.hp = 3;
       Object.assign(h, { x: C.PLAT_X0 - 30, y: C.LAVA_Y + 1, vx: 0, vy: 0, ghost: 0, hurt: 0, dead: false, onGround: false });
@@ -82,14 +82,15 @@ test.describe('R2-B · boss HP scales with mode & level', () => {
 test.describe('R2-B · RAGE mode specials', () => {
   test('two spawn boxes: enemies come from BOTH sides (neg. control: NORMAL only right)', async ({ page }) => {
     const sides = async (mode) => page.evaluate((mode) => {
-      window.BS.start(); window.BS.reseed(3); window.BS.setLevel(2); window.BS.setMode(mode);
+      window.BS.start(); window.BS.reseed(3); window.BS.setLevel(3); window.BS.setMode(mode);
+      window.BS.enterArena();                                  // L3 arena has boxes (RAGE adds a 2nd side)
       const st = window.BS.state(); st.hero.ghost = 1e9; st.enemies.length = 0;
       const seen = new Set();
       for (let i = 0; i < 40 * 120; i++) { window.BS.stepFixed(1); for (const e of window.BS.enemies()) seen.add(e.side); }
       return [...seen].sort();
     }, mode);
     expect(await sides('rage')).toEqual(['left', 'right']);   // both boxes active
-    expect(await sides('normal')).toEqual(['right']);         // negative control
+    expect(await sides('normal')).toEqual(['right']);         // negative control: one box, right only
   });
 
   test('left-box enemies march right (mirror of right box)', async ({ page }) => {
@@ -110,7 +111,7 @@ test.describe('R2-B · RAGE mode specials', () => {
     const bonus = async (mode) => page.evaluate((mode) => {
       window.BS.start(); window.BS.setMode(mode);
       const st = window.BS.state(); st.hero.ghost = 1e9; st.hitThisLevel = false; const hp0 = st.hp;
-      st.t = window.BS.CONFIG.LEVEL_TIME + 0.01; window.BS.stepFixed(1);
+      window.BS.enterArena();
       const need = window.BS.boss().maxHits;
       for (let k = 0; k < need; k++) { window.BS.boss().iframe = 0; window.BS.bossHit(); }
       return { gained: st.gainedLife, delta: st.hp - hp0 };
