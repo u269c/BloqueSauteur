@@ -1520,6 +1520,17 @@ function arenaBoxes() {
   if (MODES[Game.mode].spawners === 2) n = Math.min(2, n + 1);   // RAGE always adds a spawn side
   return n;
 }
+// Spawn a pre-placed traversal enemy on its ground segment (marches toward the hero, patrols).
+function spawnPlaced(p) {
+  const L = LEVELS[Game.level] || LEVELS[1], top = groundTopAt(Game.levelData, p.x);
+  if (top == null) return;
+  const dir = Game.hero.x < p.x ? -1 : 1, baseSpeed = L.speed * (ENEMY.speedMul[p.type] || 1);
+  Game.enemies.push({
+    x: p.x, y: top, vx: dir * baseSpeed, vy: 0, r: ENEMY.r, type: p.type, side: 'placed', dir, baseSpeed,
+    onGround: true, leaping: false, alive: true, trail: [], trailT: 0, patrol: true,
+    jumpT: 0.5 + Game.rand() * 0.7, spikes: Game.rand() < 0.5 ? 3 : 5, gaze: -1,
+  });
+}
 
 function updateEnemies(dt) {
   const C = CONFIG, ter = Game.terrain, L = LEVELS[Game.level] || LEVELS[1], h = Game.hero;
@@ -1535,6 +1546,12 @@ function updateEnemies(dt) {
         Game.spawnT = L.spawnEvery / (MODES[Game.mode].spawnMul || 1);
       }
     }
+  }
+
+  // Traverse: activate pre-placed enemies as they scroll into view; they patrol their platform.
+  if (Game.phase === 'traverse' && Game.levelData) {
+    const view = Game.cam.x + C.W * 1.15;
+    for (const p of Game.levelData.enemies) if (!p.active && p.x <= view) { p.active = true; spawnPlaced(p); }
   }
 
   for (const e of Game.enemies) {
@@ -1556,7 +1573,9 @@ function updateEnemies(dt) {
       const landX = e.x + e.dir * (C.MAX_JUMP_GAP + ter.colW);
       const holeAhead = surfaceAt(ter, aheadX) == null;
       const canLand = landX >= ter.x0 && landX < ter.x1 && surfaceAt(ter, landX) != null;
-      if (Game.level > 1 && holeAhead && canLand) {
+      if (e.patrol) {
+        if (holeAhead) { e.dir = -e.dir; e.vx = e.dir * e.baseSpeed; }   // patrol: turn at a hole/edge, never fall
+      } else if (Game.level > 1 && holeAhead && canLand) {
         e.vy = -ENEMY.leapV; e.vx = e.dir * ENEMY.leapVX; e.onGround = false; e.leaping = true;
       } else if (e.type === 'yellow') {
         e.jumpT -= dt; if (e.jumpT <= 0) { e.vy = -ENEMY.jumpImpulse; e.onGround = false; e.jumpT = 0.9 + Game.rand() * 0.6; }
@@ -1565,8 +1584,9 @@ function updateEnemies(dt) {
 
     e.gaze = h.x < e.x ? -1 : 1;                     // eye tracks the hero
 
-    // despawn: walked off either platform edge (or fell) → into the lava
-    if (e.y >= C.LAVA_Y || e.x < C.PLAT_X0 - e.r - 2 || e.x > C.PLAT_X1 + e.r + 2) e.alive = false;
+    // despawn: fell into the hazard, or walked off the world bounds
+    const leftB = (ter.traverse ? 0 : C.PLAT_X0) - e.r - 2, rightB = (ter.traverse ? ter.width : C.PLAT_X1) + e.r + 2;
+    if (e.y >= C.LAVA_Y || e.x < leftB || e.x > rightB) e.alive = false;
 
     // hero interaction (skipped while ghostly or dodging — untouchable)
     if (e.alive && h.ghost <= 0 && h.dodgeT <= 0 && !h.dead) {

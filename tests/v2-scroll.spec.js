@@ -96,6 +96,27 @@ test.describe('v2.0 · traverse → boss arena', () => {
   });
 });
 
+test.describe('v2.0 · enemies live in the level (Phase C)', () => {
+  test('pre-placed enemies activate as they scroll into view and patrol (never fall in a hole)', async ({ page }) => {
+    const r = await page.evaluate(() => {
+      window.BS.freeze(true); window.BS.start(); window.BS.reseed(5); window.BS.setLevel(3);
+      const C = window.BS.CONFIG, lvl = window.BS.levelData(), h = window.BS.hero(); h.ghost = 1e9;
+      let fell = 0, moved = false;
+      for (let seg = 0; seg <= 30; seg++) {         // scrub the camera across the level
+        h.x = Math.min(lvl.exitX - 10, (seg / 30) * lvl.exitX); h.vx = 0;
+        for (const e of window.BS.enemies()) { const x0 = e.x; }
+        for (let k = 0; k < 20; k++) window.BS.stepFixed(1);
+        for (const e of window.BS.enemies()) { if (e.y >= C.LAVA_Y - 1) fell++; if (Math.abs(e.vx) > 1) moved = true; }
+      }
+      return { placements: lvl.enemies.length, activated: lvl.enemies.filter((e) => e.active).length, fell, moved };
+    });
+    expect(r.placements).toBeGreaterThan(0);
+    expect(r.activated).toBe(r.placements);   // all activated as the camera passed them
+    expect(r.moved).toBe(true);               // they patrol (march) …
+    expect(r.fell).toBe(0);                   // …and turn at edges instead of walking into holes
+  });
+});
+
 test.describe('v2.0 · boss-arena spec (holes + boxes per level)', () => {
   test('arena hole counts match the table (0,2,2,3,3)', async ({ page }) => {
     const r = await page.evaluate(() => {

@@ -30,7 +30,7 @@ test.describe('PR5 · double jump', () => {
 test.describe('PR5 · spiked shield', () => {
   test('armed shield kills the next attacker (no damage) then goes on cooldown; unarmed hurts (neg. control)', async ({ page }) => {
     const hitWith = async (arm) => page.evaluate((arm) => {
-      window.BS.start(); window.BS.reseed(1); window.BS.setLevel(1); window.BS.setMode('normal'); window.BS.Input.reset();
+      window.BS.start(); window.BS.reseed(1); window.BS.setupArena(1); window.BS.setMode('normal'); window.BS.Input.reset();
       const st = window.BS.state(); st.owned.shield = true; st.bossActive = true; st.enemies.length = 0; st.hp = 3;
       const C = window.BS.CONFIG, h = window.BS.hero();
       Object.assign(h, { x: 240, y: C.PLAT_Y, vx: 0, vy: 0, onGround: true, ghost: 0, hurt: 0, dodgeT: 0, shieldT: 0, shieldCd: 0, dead: false });

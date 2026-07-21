@@ -30,7 +30,7 @@ test.describe('v1.2 · Strong Hit', () => {
 
   test('landing a dive blasts nearby monsters (area kill) — none survive; without strong they do (neg. control)', async ({ page }) => {
     const run = async (strong) => page.evaluate((strong) => {
-      window.BS.start(); window.BS.reseed(1); window.BS.setLevel(1); window.BS.setMode('normal');
+      window.BS.start(); window.BS.reseed(1); window.BS.setupArena(1); window.BS.setMode('normal');
       const st = window.BS.state(); st.owned.strongHit = true; st.bossActive = true; st.enemies.length = 0;
       const C = window.BS.CONFIG, h = window.BS.hero();
       Object.assign(h, { x: 240, y: C.PLAT_Y - 8, vx: 0, vy: 0, onGround: false, ghost: 1e9, strong });
