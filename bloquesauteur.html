@@ -1302,12 +1302,13 @@ function collideHero(h, dt) {
   }
 }
 
-// Falling into the lava costs a whole heart and respawns you (ghostly), regardless of mode.
+// Falling into the lava/hole costs a heart (Easy: only ½) and respawns you (ghostly).
 function heroDie() {
   const h = Game.hero; if (h.dead) return;
   h.dead = true;
   Game.hitThisLevel = true;
-  Game.hp = Math.max(0, Game.hp - 1);
+  const dmg = Game.mode === 'easy' ? 0.5 : 1;     // Easy is forgiving on falls
+  Game.hp = Math.max(0, Game.hp - dmg);
   Audio.sfx('die'); spawnBurst(h.x, CONFIG.LAVA_Y, '#f4a300', 24); shake(8);
   if (Game.hp <= 0) { Game.hp = 0; onGameOver(); return; }
   respawnHero();

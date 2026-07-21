@@ -25,6 +25,19 @@ test.describe('R2-B · hit damage per mode', () => {
     expect(rage.hp).toBeCloseTo(2.5, 5);        // −1/2
   });
 
+  test('EASY hole/lava fall costs ½ heart (neg. control: NORMAL costs a full heart)', async ({ page }) => {
+    const fall = async (mode) => page.evaluate((mode) => {
+      window.BS.start(); window.BS.reseed(1); window.BS.setLevel(1); window.BS.setMode(mode);
+      const st = window.BS.state(), C = window.BS.CONFIG, h = window.BS.hero();
+      st.hp = 3;
+      Object.assign(h, { x: C.PLAT_X0 - 30, y: C.LAVA_Y + 1, vx: 0, vy: 0, ghost: 0, hurt: 0, dead: false, onGround: false });
+      window.BS.stepFixed(1);   // one step → heroDie fires (y past the lava line)
+      return st.hp;
+    }, mode);
+    expect(await fall('easy')).toBeCloseTo(2.5, 5);     // Easy: −½ heart
+    expect(await fall('normal')).toBeCloseTo(2.0, 5);   // neg. control: full −1 heart
+  });
+
   test('EASY: enemy side-contact never chips health (neg. control vs NORMAL)', async ({ page }) => {
     const hpAfterContact = async (mode) => page.evaluate((mode) => {
       window.BS.start(); window.BS.reseed(1); window.BS.setLevel(1); window.BS.setMode(mode);
