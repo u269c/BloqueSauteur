@@ -1605,7 +1605,7 @@ function updateEnemies(dt) {
       const hl = h.x - h.w / 2, hr = h.x + h.w / 2, htop = h.y - h.h, hbot = h.y;
       if (hr > el && hl < er && hbot > etop && htop < ebot) {
         const stomp = h.vy > 0 && h.y < e.y - e.r;   // falling onto its top half
-        if (stomp) { e.alive = false; h.vy = -ENEMY.bounce; h.onGround = false; addKill(e.x, e.y - e.r, ENEMY_COL[e.type] || '#fff'); shake(3); }
+        if (stomp) { e.alive = false; h.vy = -ENEMY.bounce; h.onGround = false; h.jumping = true; addKill(e.x, e.y - e.r, ENEMY_COL[e.type] || '#fff'); shake(3); }   // holding jump → full-height rebound (chain stomps)
         else if (h.shieldT > 0) { e.alive = false; h.shieldT = 0; addKill(e.x, e.y - e.r, '#c9d0da'); shake(4); }  // spiked shield kills the attacker
         else heroHurt(e.x > h.x);                     // hit → knock away from the enemy
       }
@@ -1721,7 +1721,7 @@ function updateBoss(dt) {
     const hl = h.x - h.w / 2, hr = h.x + h.w / 2, htop = h.y - h.h, hbot = h.y;
     if (hr > bl && hl < br && hbot > btop && htop < bbot) {
       const stomp = h.vy > 0 && h.y < b.y - b.r;
-      if (stomp) { bossHit(b, h.strong ? 2 : 1); Game.hero.vy = -ENEMY.bounce; Game.hero.onGround = false; h.strong = false; }
+      if (stomp) { bossHit(b, h.strong ? 2 : 1); h.vy = -ENEMY.bounce; h.onGround = false; h.jumping = true; h.strong = false; }   // held jump → full rebound
       else if (h.shieldT > 0) { h.shieldT = 0; bossHit(b); }   // shield damages the boss instead of hurting you
       else heroHurt(b.x > h.x);
     }
@@ -2066,11 +2066,43 @@ function drawTerrain() {
   for (const s of segs) { if (fn) fn(s, d); else segDefault(s, d); }
   if (ter.traverse) for (const f of ter.floats) drawFloat(f, d);
 }
-// A one-way jump-through platform (thin ledge; open air below).
+// One-way jump-through platforms — chunky, themed to the world (open air below).
+const FLOAT_H = 12;
+function floatBase(f, body, edge, hi) {
+  ctx.fillStyle = body; ctx.fillRect(f.x, f.y, f.w, FLOAT_H);
+  ctx.fillStyle = edge; ctx.fillRect(f.x, f.y, f.w, 3);                          // top lip
+  ctx.fillStyle = hi; ctx.fillRect(f.x, f.y, f.w, 1);                            // highlight
+  ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(f.x, f.y + FLOAT_H - 2, f.w, 2);   // underside shadow
+}
+const FLOAT_RENDER = {
+  skyClouds(f) {                                   // fluffy cloud (matches the cloud ground)
+    const n = Math.max(2, Math.round(f.w / 9)), cw = f.w / n;
+    ctx.fillStyle = '#e9eff8'; ctx.fillRect(f.x, f.y + 2, f.w, FLOAT_H - 2);
+    ctx.fillStyle = '#fff'; for (let i = 0; i < n; i++) { ctx.beginPath(); ctx.arc(f.x + (i + 0.5) * cw, f.y + 3, 4.5, Math.PI, 0); ctx.fill(); }
+    ctx.fillStyle = 'rgba(170,182,205,0.55)'; ctx.fillRect(f.x, f.y + FLOAT_H - 2, f.w, 2);
+  },
+  classic(f) {                                     // basalt rock slab with a molten underglow
+    floatBase(f, '#2b2f38', '#5b6472', '#7a8494');
+    ctx.fillStyle = '#1c2027'; for (let bx = f.x + 5; bx < f.x + f.w - 3; bx += 9) ctx.fillRect(bx, f.y + 4, 2, FLOAT_H - 6);
+    ctx.fillStyle = 'rgba(232,96,24,0.55)'; ctx.fillRect(f.x + 1, f.y + FLOAT_H - 1, f.w - 2, 1);
+  },
+  rooftops(f) {                                    // concrete girder with rivets
+    floatBase(f, '#5a606b', '#7d838e', '#9aa0ab');
+    ctx.fillStyle = '#3c414a'; for (let bx = f.x + 4; bx < f.x + f.w - 3; bx += 6) ctx.fillRect(bx, f.y + 7, 2, 2);
+  },
+  wood(f, d) {                                     // plank ledge (climbing / rope bridge / mansion)
+    floatBase(f, d.body, d.edge, d.hi);
+    ctx.fillStyle = 'rgba(0,0,0,0.25)'; for (let bx = f.x + 6; bx < f.x + f.w - 2; bx += 8) ctx.fillRect(bx, f.y + 3, 1, FLOAT_H - 4);
+  },
+};
+FLOAT_RENDER.climbing = FLOAT_RENDER.wood;
+FLOAT_RENDER.ropeBridge = FLOAT_RENDER.wood;
+FLOAT_RENDER.mansion = FLOAT_RENDER.wood;
 function drawFloat(f, d) {
-  ctx.fillStyle = d.body; ctx.fillRect(f.x, f.y, f.w, 6);
-  ctx.fillStyle = d.edge; ctx.fillRect(f.x, f.y, f.w, 3);
-  ctx.fillStyle = d.hi; ctx.fillRect(f.x, f.y, f.w, 1);
+  const fn = FLOAT_RENDER[Game.theme.world];
+  if (fn) { fn(f, d); return; }
+  floatBase(f, d.body, d.edge, d.hi);              // themed slab (poison / wine / beach / bathtub)
+  ctx.fillStyle = d.brick; for (let bx = f.x + 5; bx < f.x + f.w - 3; bx += 8) ctx.fillRect(bx, f.y + 4, 1, FLOAT_H - 6);
 }
 
 function heroColor(h) {
