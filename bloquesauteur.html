@@ -249,7 +249,7 @@ const CONFIG = {
   MAX_JUMP_GAP: 48,                  // 3 tiles — widest hole the hero can clear
   JUMP_MAX_H: 48,                    // 3 tiles — apex height
   // Meta
-  LIVES_START: 3, LEVEL_TIME: 60, RESPAWN_GHOST: 2.0,
+  LIVES_START: 3, RESPAWN_GHOST: 2.0,
 };
 
 // 3×3 solid colours + rainbow (index 9), per concept art IMG_0049.
@@ -276,6 +276,23 @@ const LEVELS = {
   5: { types: ['clear', 'red', 'yellow'], spawnEvery: 1.3, speed: 34, maxAlive: 8, boss: 'volcano' },
 };
 const LAST_LEVEL = 5;
+// v2.0 side-scroll: per-level count of holes + one-way jump-up floats along the run
+// (scaled up with the level). Also how many enemies to pre-place.
+const TRAVERSE = {
+  1: { holes: 4,  floats: 3,  enemies: 3 },
+  2: { holes: 6,  floats: 5,  enemies: 5 },
+  3: { holes: 9,  floats: 8,  enemies: 7 },
+  4: { holes: 12, floats: 11, enemies: 9 },
+  5: { holes: 15, floats: 13, enemies: 12 },
+};
+// Boss arena (the single-screen duel at the level's end): exact holes + spawn boxes.
+const ARENA = {
+  1: { holes: 0, boxes: 0, boxSpeed: 1 },
+  2: { holes: 2, boxes: 0, boxSpeed: 1 },
+  3: { holes: 2, boxes: 1, boxSpeed: 1 },
+  4: { holes: 3, boxes: 1, boxSpeed: 1.3 },
+  5: { holes: 3, boxes: 2, boxSpeed: 1.3 },
+};
 const ENEMY = { r: 7, speedMul: { clear: 1, red: 1.7, yellow: 1 }, bounce: 300, jumpImpulse: 205, gravity: 900, leapV: 250, leapVX: 118 };
 const BOSS = {
   r: 17, hits: 3, iframe: 0.9, returnSpeed: 95, jumpImpulse: 250, freeze: 5,
@@ -559,10 +576,10 @@ function genTerrain(level, seed) {
     return placed;
   }
 
+  const nh = (ARENA[level] || ARENA[1]).holes;             // exact per-level arena hole count
   if (level === 1) { /* flat */ }
-  else if (level === 2) { carveHoles(2 + Math.floor(rand() * 2), 2, 2); raiseHills(1 + Math.floor(rand() * 2), 1); }
-  else if (level === 3) { carveHoles(1 + Math.floor(rand() * 2), 2, maxHoleCols); }
-  else { carveHoles(3 + Math.floor(rand() * 2), 2, 2); raiseHills(2 + Math.floor(rand() * 2), 1); }
+  else if (level === 3) { carveHoles(nh, 2, maxHoleCols); }
+  else { carveHoles(nh, 2, 2); raiseHills(1 + Math.floor(rand() * 2), 1); }
 
   // L3: raise every other mini-platform by one tile (visual + light platforming).
   if (level === 3) {
@@ -584,12 +601,53 @@ function genTerrain(level, seed) {
     segments.push({ x0: x0 + i * T, x1: x0 + j * T, top: h[i] });
     i = j;
   }
-  return { level, seed: seed >>> 0, cols: h, segments, baseTop, x0, x1, colW: T, nCols };
+  return { level, seed: seed >>> 0, arena: true, cols: h, segments, baseTop, x0, x1, colW: T, nCols };
 }
 
-// Surface top y at world-x, or null if over a hole / off the platform.
+// v2.0 traversal level: a long left→right strip of solid GROUND segments (gaps between
+// them = holes; a fall = death) plus one-way jump-up FLOAT platforms. Reaching exitX
+// starts the boss arena. Enemies are pre-placed along the ground (activated in Phase C).
+function genLevel(level, seed) {
+  const C = CONFIG, T = C.TILE, top = C.PLAT_Y;
+  const rand = mulberry32(((seed >>> 0) ^ Math.imul((level | 0) + 101, 0x9E3779B1)) >>> 0);
+  const p = TRAVERSE[level] || TRAVERSE[1];
+  const roster = (LEVELS[level] || LEVELS[1]).types;
+  const ground = [], floats = [], enemies = [];
+  let x = 0;
+  const ENTRANCE = Math.round(C.W * 0.6);                  // safe run-up: no holes near the start
+  ground.push({ x0: 0, x1: ENTRANCE, top }); x = ENTRANCE;
+  for (let i = 0; i < p.holes; i++) {
+    const hw = (2 + Math.floor(rand() * 2)) * T;           // 2-3 tile hole (≤ MAX_JUMP_GAP)
+    if (i < p.floats) {                                    // a "1 level up" jump-through platform over the gap
+      const fw = (2 + Math.floor(rand() * 2)) * T;
+      floats.push({ x: x + Math.round((hw - fw) / 2), y: top - 2 * T, w: fw });
+    }
+    x += hw;
+    const gw = (4 + Math.floor(rand() * 5)) * T;           // 4-8 tile ground run
+    if (enemies.length < p.enemies) enemies.push({ x: Math.round(x + gw / 2), type: roster[Math.floor(rand() * roster.length)] });
+    ground.push({ x0: x, x1: x + gw, top }); x += gw;
+  }
+  const EXIT = Math.round(C.W * 0.5);
+  const exitX = x + 2 * T;
+  ground.push({ x0: x, x1: x + EXIT, top }); x += EXIT;    // solid exit pad → boss arena
+  return { level, seed: seed >>> 0, traverse: true, ground, floats, enemies, width: x, exitX, top, baseTop: top, x0: 0, x1: x, colW: T };
+}
+const genArena = genTerrain;   // the boss arena is the classic single-screen terrain
+// Ground top at world-x for a traversal level (floats excluded), or null over a hole.
+function groundTopAt(lvl, x) { for (const g of lvl.ground) if (x >= g.x0 && x < g.x1) return g.top; return null; }
+// Nearest solid ground centre to x (traversal respawn).
+function findGroundX(lvl, x) {
+  let best = null, bd = Infinity;
+  for (const g of lvl.ground) { const cx = (g.x0 + g.x1) / 2; if (Math.abs(cx - x) < bd) { bd = Math.abs(cx - x); best = cx; } }
+  return best != null ? Math.round(best) : Math.round(lvl.width / 2);
+}
+
+// Surface top y at world-x, or null if over a hole / off the platform. Works for both
+// the traversal level (ground strip) and the arena (column heightmap).
 function surfaceAt(terrain, x) {
-  if (!terrain || x < terrain.x0 || x >= terrain.x1) return null;
+  if (!terrain) return null;
+  if (terrain.traverse) return groundTopAt(terrain, x);
+  if (x < terrain.x0 || x >= terrain.x1) return null;
   return terrain.cols[Math.floor((x - terrain.x0) / terrain.colW)];
 }
 // A solid x near the centre, for hero spawn / respawn.
@@ -614,9 +672,12 @@ const Game = {
   rand: null,            // active PRNG (reseeded per game)
   t: 0,                  // seconds elapsed in current scene
   level: 1,
+  phase: 'traverse',     // v2.0: 'traverse' (scroll to the exit) | 'boss' (locked arena)
+  levelData: null,       // the traversal Level descriptor (ground/floats/enemies/exitX)
+  cam: { x: 0 },         // horizontal camera offset (world→screen)
   mode: 'normal',        // easy | normal | rage
   hp: CONFIG.LIVES_START, // health in hearts (fractional)
-  terrain: null,
+  terrain: null,         // current-phase terrain: the Level (traverse) or the arena (boss)
   theme: { world: 'classic', sky: 'sunset' },   // assigned per level from the seed
   themeOrder: null,
   enemies: [],
@@ -714,7 +775,11 @@ function reseed(seed) {
   buildLevel();
 }
 function buildLevel() {
-  Game.terrain = genTerrain(Game.level, Game.seed);
+  // A level begins in the scrolling TRAVERSE phase (the boss arena comes at the exit).
+  Game.phase = 'traverse';
+  Game.levelData = genLevel(Game.level, Game.seed);
+  Game.terrain = Game.levelData;
+  Game.cam.x = 0;
   // Assign this level's look (debug override: ?theme=world,sky).
   const o = Game.themeOrder || { worlds: WORLD_KEYS, skies: SKY_KEYS };
   const i = (Game.level - 1);
@@ -727,20 +792,38 @@ function buildLevel() {
   Game.enemies = [];
   Game.boss = null;
   Game.bossActive = false;
-  Game.spawnT = (LEVELS[Game.level] || LEVELS[1]).spawnEvery * 0.5 / (MODES[Game.mode].spawnMul || 1);   // first wave comes a touch early
-  const sx = findSafeX(Game.terrain);
+  Game.spawnT = (LEVELS[Game.level] || LEVELS[1]).spawnEvery * 0.5 / (MODES[Game.mode].spawnMul || 1);
+  const sx = Math.round(CONFIG.W * 0.15);          // start on the left entrance pad
   Object.assign(Game.hero, {
-    x: sx, y: surfaceAt(Game.terrain, sx) ?? CONFIG.PLAT_Y, vx: 0, vy: 0,
+    x: sx, y: Game.levelData.top, vx: 0, vy: 0,
     onGround: true, coyote: 0, jumpBuf: 0, jumping: false, hurt: 0, knock: 0, ghost: 0, dead: false,
     airJumps: 0, shieldT: 0, shieldCd: 0, dodgeT: 0, dodgeCd: 0, strong: false, frozen: 0,
   });
 }
-function respawnHero() {
-  const t = Game.terrain, sx = findSafeX(t);
+// Reached the level exit → lock the camera into the single-screen boss arena and fight.
+function enterBossArena() {
+  const C = CONFIG;
+  Game.phase = 'boss';
+  Game.terrain = genArena(Game.level, Game.seed);
+  Game.cam.x = 0;
+  Game.enemies = [];
+  const sx = C.PLAT_X0 + 30, sy = surfaceAt(Game.terrain, sx) ?? C.PLAT_Y;
   Object.assign(Game.hero, {
-    x: sx, y: surfaceAt(t, sx) ?? CONFIG.PLAT_Y, vx: 0, vy: 0,
+    x: sx, y: sy, vx: 0, vy: 0,
+    onGround: true, coyote: 0, jumpBuf: 0, jumping: false, hurt: 0, knock: 0, ghost: 0, dead: false,
+    airJumps: 0, shieldT: 0, shieldCd: 0, dodgeT: 0, dodgeCd: 0, strong: false, frozen: 0,
+  });
+  activateBoss();
+}
+function respawnHero() {
+  const h = Game.hero, C = CONFIG;
+  let sx, sy;
+  if (Game.phase === 'traverse') { sx = findGroundX(Game.levelData, h.x); sy = groundTopAt(Game.levelData, sx) ?? Game.levelData.top; }
+  else { sx = findSafeX(Game.terrain); sy = surfaceAt(Game.terrain, sx) ?? C.PLAT_Y; }
+  Object.assign(h, {
+    x: sx, y: sy, vx: 0, vy: 0,
     onGround: true, coyote: 0, jumpBuf: 0, jumping: false, hurt: 0, knock: 0, dead: false, strong: false, frozen: 0,
-    ghost: CONFIG.RESPAWN_GHOST,        // 2s ghostly invincibility — enemies pass through
+    ghost: C.RESPAWN_GHOST,        // 2s ghostly invincibility — enemies pass through
   });
 }
 
@@ -1367,6 +1450,27 @@ function collideHero(h, dt) {
   }
 }
 
+// Traversal physics: AABB vs the ground strip (solid tops) + one-way FLOAT platforms
+// (land on top, pass up through from below). Single-tier ground → no side walls; the
+// hero simply walks off edges into holes. Left edge is a wall; the right end is the exit.
+function collideHeroScroll(h, dt) {
+  const lvl = Game.levelData, hw = h.w / 2;
+  // horizontal
+  h.x += h.vx * dt;
+  if (h.x < hw) { h.x = hw; if (h.vx < 0) h.vx = 0; }               // left wall
+  if (h.x > lvl.width - hw) h.x = lvl.width - hw;                    // clamp to level end
+  // vertical
+  const feetPrev = h.y;                                             // feet before this step
+  h.y += h.vy * dt;
+  h.onGround = false;
+  if (h.vy >= 0) {
+    let gy = null;
+    for (const g of lvl.ground) if (h.x >= g.x0 && h.x < g.x1 && h.y >= g.top && (gy == null || g.top < gy)) gy = g.top;
+    for (const f of lvl.floats) if (h.x >= f.x && h.x < f.x + f.w && h.y >= f.y && feetPrev <= f.y + 2 && (gy == null || f.y < gy)) gy = f.y;   // one-way: only when landing from above
+    if (gy != null) { h.y = gy; h.vy = 0; h.onGround = true; }
+  }
+}
+
 // Falling into the lava/hole costs a heart (Easy: only ½) and respawns you (ghostly).
 function heroDie() {
   const h = Game.hero; if (h.dead) return;
@@ -1395,12 +1499,12 @@ function heroHurt(fromRight) {
 }
 
 // ── Enemies + spawner ─────────────────────────────────────────────
-function spawnEnemy(type, side) {
+function spawnEnemy(type, side, speedMul) {
   const C = CONFIG, L = LEVELS[Game.level] || LEVELS[1];
   type = type || L.types[Math.floor(Game.rand() * L.types.length)];
   side = side || 'right';
   const dir = side === 'left' ? 1 : -1;                 // left box marches right, right box marches left
-  const baseSpeed = L.speed * (ENEMY.speedMul[type] || 1);
+  const baseSpeed = L.speed * (ENEMY.speedMul[type] || 1) * (speedMul || 1);   // arena boxes may run faster (L4/L5 = 1.3x)
   Game.enemies.push({
     x: side === 'left' ? C.SPAWN_X_L : C.SPAWN_X, y: C.SPAWN_Y + 12,
     vx: dir * baseSpeed, vy: 0, r: ENEMY.r, type, side, dir, baseSpeed,
@@ -1409,16 +1513,27 @@ function spawnEnemy(type, side) {
   });
   Audio.sfx('spawn');
 }
+// How many spawn boxes the current boss arena has (base per level + RAGE's extra side, cap 2).
+function arenaBoxes() {
+  const a = ARENA[Game.level] || ARENA[1];
+  let n = a.boxes;
+  if (MODES[Game.mode].spawners === 2) n = Math.min(2, n + 1);   // RAGE always adds a spawn side
+  return n;
+}
 
 function updateEnemies(dt) {
   const C = CONFIG, ter = Game.terrain, L = LEVELS[Game.level] || LEVELS[1], h = Game.hero;
 
-  // spawn cadence (paused during boss). RAGE mode feeds from both sides.
-  if (!Game.bossActive) {
-    Game.spawnT -= dt;
-    if (Game.spawnT <= 0 && Game.enemies.length < L.maxAlive) {
-      const side = (MODES[Game.mode].spawners === 2 && Game.rand() < 0.5) ? 'left' : 'right';
-      spawnEnemy(undefined, side); Game.spawnT = L.spawnEvery / (MODES[Game.mode].spawnMul || 1);
+  // Boss-arena spawn boxes feed reinforcements DURING the duel (none during traverse).
+  if (Game.phase === 'boss' && Game.bossActive) {
+    const boxes = arenaBoxes(), a = ARENA[Game.level] || ARENA[1];
+    if (boxes > 0) {
+      Game.spawnT -= dt;
+      if (Game.spawnT <= 0 && Game.enemies.length < L.maxAlive) {
+        const side = (boxes >= 2 && Game.rand() < 0.5) ? 'left' : 'right';
+        spawnEnemy(undefined, side, a.boxSpeed);
+        Game.spawnT = L.spawnEvery / (MODES[Game.mode].spawnMul || 1);
+      }
     }
   }
 
@@ -1616,7 +1731,6 @@ function update(dt) {
     h.vx = 0; h.vy = 0;                       // frozen — no fall while dodging
     if (h.dodgeT <= 0) { h.dodgeT = 0; h.dodgeCd = C.DODGE_CD; }
     updateEnemies(dt);
-    if (!Game.bossActive && !Game.boss && Game.t >= C.LEVEL_TIME) activateBoss();
     updateBoss(dt);
     return;
   }
@@ -1659,7 +1773,7 @@ function update(dt) {
   h.vy = Math.min(h.vy + g * dt, C.MAX_FALL);
 
   const wasAir = !h.onGround;
-  collideHero(h, dt);
+  if (Game.phase === 'traverse') collideHeroScroll(h, dt); else collideHero(h, dt);
   // Strong-hit floor blast: landing a dive clears nearby monsters (and blasts the boss).
   if (h.strong && h.onGround && wasAir) { strongHitBlast(); h.strong = false; }
   if (wasAir && h.onGround) Game.combo = 0;   // landing ends the combo chain
@@ -1667,10 +1781,13 @@ function update(dt) {
   // lava death — fell into a hole or off an edge and reached the lava surface
   if (h.y >= C.LAVA_Y) heroDie();
 
-  updateEnemies(dt);
+  // scroll the camera and, on reaching the exit, lock into the boss arena
+  if (Game.phase === 'traverse') {
+    Game.cam.x = Math.max(0, Math.min(Game.levelData.width - C.W, Math.round(h.x - C.W * 0.4)));
+    if (!h.dead && h.x >= Game.levelData.exitX) { enterBossArena(); return; }
+  }
 
-  // boss emerges once the 60s survival timer elapses
-  if (!Game.bossActive && !Game.boss && Game.t >= C.LEVEL_TIME) activateBoss();
+  updateEnemies(dt);
   updateBoss(dt);
 }
 
@@ -1914,7 +2031,15 @@ function drawTerrain() {
   const ter = Game.terrain; if (!ter) return;
   const world = Game.theme.world, d = (WORLDS[world] || WORLDS.classic).deco, fn = SEG_RENDER[world];
   // Holes (gaps between segments) stay open → sky/hazard shows through.
-  for (const s of ter.segments) { if (fn) fn(s, d); else segDefault(s, d); }
+  const segs = ter.traverse ? ter.ground : ter.segments;
+  for (const s of segs) { if (fn) fn(s, d); else segDefault(s, d); }
+  if (ter.traverse) for (const f of ter.floats) drawFloat(f, d);
+}
+// A one-way jump-through platform (thin ledge; open air below).
+function drawFloat(f, d) {
+  ctx.fillStyle = d.body; ctx.fillRect(f.x, f.y, f.w, 6);
+  ctx.fillStyle = d.edge; ctx.fillRect(f.x, f.y, f.w, 3);
+  ctx.fillStyle = d.hi; ctx.fillRect(f.x, f.y, f.w, 1);
 }
 
 function heroColor(h) {
@@ -2200,13 +2325,14 @@ function drawHUD() {
   // level name + score (top-left, second row; kept clear of the top-right buttons)
   ctx.fillStyle = '#93a1a1'; ctx.fillText('LV' + Game.level + ' ' + (LEVEL_NAMES[Game.level] || ''), 6, 18);
   ctx.fillStyle = '#8a9ba0'; ctx.fillText('POINTS ' + Game.points, 6, 28);
-  // timer / boss flag (centre)
+  // boss flag / level-progress bar (centre)
   if (Game.scene === 'PLAY') {
-    if (Game.bossActive) { ctx.textAlign = 'center'; ctx.fillStyle = '#e0392f'; ctx.font = '10px monospace'; ctx.fillText('◆ BOSS ◆', C.W / 2, 7); ctx.textAlign = 'left'; }
-    else {
-      const remain = Math.max(0, Math.ceil(C.LEVEL_TIME - Game.t));
-      ctx.textAlign = 'center'; ctx.fillStyle = remain <= 10 ? '#f4d03f' : '#eee8d5'; ctx.font = '11px monospace';
-      ctx.fillText(remain + '', C.W / 2, 7); ctx.textAlign = 'left';
+    if (Game.phase === 'boss') { ctx.textAlign = 'center'; ctx.fillStyle = '#e0392f'; ctx.font = '10px monospace'; ctx.fillText('◆ BOSS ◆', C.W / 2, 7); ctx.textAlign = 'left'; }
+    else if (Game.levelData) {
+      const bw = 90, bx = (C.W - bw) / 2, by = 5, frac = Math.max(0, Math.min(1, Game.hero.x / Game.levelData.exitX));
+      ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.fillRect(bx - 1, by - 1, bw + 2, 6);
+      ctx.fillStyle = '#7cb342'; ctx.fillRect(bx, by, Math.round(bw * frac), 4);
+      ctx.fillStyle = '#e0392f'; ctx.fillRect(bx + bw - 2, by - 1, 3, 6);   // the boss waits at the end
     }
   }
 }
@@ -2264,25 +2390,31 @@ function render() {
     ctx.translate((Math.random() * 2 - 1) * m, (Math.random() * 2 - 1) * m);
   }
 
-  // Themed sky → world backdrop → hazard → platforms (holes show sky/hazard through)
+  // Background stays screen-fixed (parallax 0): themed sky → backdrop → hazard band.
   drawSky(Game.theme.sky);
   drawWorldBackdrop(Game.theme.world);
   drawHazard(Game.theme.world);
+
+  // Foreground scrolls with the camera (world space).
+  ctx.save();
+  ctx.translate(-Math.round(Game.cam.x), 0);
   drawTerrain();
-
-  // Spawner cube(s) — RAGE mode adds a second box on the left.
-  drawSpawner(C.SPAWN_X);
-  if (MODES[Game.mode].spawners === 2) drawSpawner(C.SPAWN_X_L);
-
+  // Spawn box(es) — only during the boss duel; count per level (+RAGE side).
+  if (Game.phase === 'boss' && Game.bossActive) {
+    const boxes = arenaBoxes();
+    if (boxes >= 1) drawSpawner(C.SPAWN_X);
+    if (boxes >= 2) drawSpawner(C.SPAWN_X_L);
+  }
   const live = Game.scene === 'PLAY' || Game.scene === 'INTRO' || Game.scene === 'CLEAR' || Game.scene === 'SHOP';
   if (live) { drawEnemies(); drawBoss(); drawHero(); }
   if (Game.scene === 'SHOP') drawMerchant();
   drawParticles();
+  ctx.restore();
 
   if (live) drawHUD();
 
   // Scene overlays (canvas-drawn transient screens)
-  if (Game.scene === 'INTRO') centerText([{ t: 'LEVEL ' + Game.level, big: true, color: '#f4d03f' }, { t: (WORLDS[Game.theme.world] || {}).name + ' · ' + (SKY_NAMES[Game.theme.sky] || ''), color: '#eee8d5' }, { t: 'survive 60 seconds, then the boss', color: '#93a1a1' }]);
+  if (Game.scene === 'INTRO') centerText([{ t: 'LEVEL ' + Game.level, big: true, color: '#f4d03f' }, { t: (WORLDS[Game.theme.world] || {}).name + ' · ' + (SKY_NAMES[Game.theme.sky] || ''), color: '#eee8d5' }, { t: 'run to the end, then fight the boss', color: '#93a1a1' }]);
   else if (Game.scene === 'CLEAR') centerText([{ t: 'LEVEL CLEAR', big: true, color: '#7cb342' }].concat(Game.gainedLife ? [{ t: '★ no-hit bonus: +1 heart! ★', color: '#f4d03f' }] : [{ t: 'points ' + Game.points, color: '#93a1a1' }]));
   else if (Game.scene === 'GAMEOVER') centerText([{ t: 'GAME OVER', big: true, color: '#e0392f' }, { t: 'reached level ' + Game.level, color: '#eee8d5' }, { t: 'tap to return to title', color: '#93a1a1' }]);
   else if (Game.scene === 'VICTORY') centerText([{ t: 'VICTORY!', big: true, color: '#f4d03f' }, { t: 'you conquered the tower', color: '#eee8d5' }, { t: MODES[Game.mode].name, color: '#93a1a1' }, { t: 'tap to return to title', color: '#93a1a1' }]);
@@ -2366,8 +2498,16 @@ window.BS = {
   scene: () => Game.scene,
   seed: () => Game.seed,
   reseed,
-  genTerrain, surfaceAt, findSafeX,
+  genTerrain, genArena, genLevel, surfaceAt, findSafeX,
   terrain: () => Game.terrain,
+  levelData: () => Game.levelData,
+  phase: () => Game.phase,
+  cam: () => Game.cam,
+  enterArena: () => enterBossArena(),
+  // Test seam: drop into the classic single-screen arena terrain WITHOUT a boss or
+  // auto-spawns, so combat/enemy micro-tests keep the old flat-terrain semantics.
+  setupArena: (n) => { Game.level = n | 0; Game.phase = 'boss'; Game.terrain = genArena(Game.level, Game.seed); Game.cam.x = 0; Game.enemies = []; Game.boss = null; Game.bossActive = false; },
+  arenaBoxes,
   setLevel: (n) => { Game.level = n | 0; buildLevel(); },
   hero: () => Game.hero,
   heroHurt, respawnHero,

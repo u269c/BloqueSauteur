@@ -12,13 +12,9 @@ test.describe('P4 · spawner cadence & roster', () => {
   test('L1 spawns only clear enemies; L3 mixes all three (neg. control)', async ({ page }) => {
     const r = await page.evaluate(() => {
       const seen = (level) => {
-        window.BS.start(); window.BS.reseed(42); window.BS.setLevel(level);
-        window.BS.state().enemies.length = 0; window.BS.state().hero.ghost = 1e9;   // survive the full window
+        window.BS.start(); window.BS.reseed(42); window.BS.setupArena(level);
         const types = new Set();
-        for (let i = 0; i < 60 * 120; i++) {           // ~60 s of fixed steps
-          window.BS.stepFixed(1);
-          for (const e of window.BS.enemies()) types.add(e.type);
-        }
+        for (let i = 0; i < 200; i++) { window.BS.state().enemies.length = 0; window.BS.spawnEnemy(); types.add(window.BS.enemies()[0].type); }
         return [...types];
       };
       return { l1: seen(1), l3: seen(3) };
@@ -29,23 +25,17 @@ test.describe('P4 · spawner cadence & roster', () => {
     expect(new Set(r.l3)).toEqual(new Set(['clear', 'red', 'yellow']));   // L3: all three
   });
 
-  test('spawn count roughly tracks the per-level cadence; capped by maxAlive', async ({ page }) => {
+  test('boss-arena boxes spawn reinforcements, capped by maxAlive (L3 has a box)', async ({ page }) => {
     const r = await page.evaluate(() => {
-      window.BS.start(); window.BS.reseed(7); window.BS.setLevel(2);
-      window.BS.state().enemies.length = 0;
-      const st = window.BS.state();
-      let spawns = 0, prev = 0, maxAlive = 0;
-      // count rising edges of total spawned by watching kills+alive is noisy; instead
-      // disable death by keeping the hero ghostly and count via a spawn counter shim.
-      st.hero.ghost = 1e9;
-      const seenIds = new Set();
-      for (let i = 0; i < 20 * 120; i++) {              // 20 s
-        window.BS.stepFixed(1);
-        maxAlive = Math.max(maxAlive, window.BS.enemies().length);
-      }
-      return { maxAlive, cap: window.BS.LEVELS[2].maxAlive };
+      window.BS.start(); window.BS.reseed(7); window.BS.setupArena(3);
+      window.BS.enterArena();                            // boss fight → the arena box feeds enemies
+      const st = window.BS.state(); st.hero.ghost = 1e9;
+      let maxAlive = 0;
+      for (let i = 0; i < 20 * 120; i++) { window.BS.stepFixed(1); maxAlive = Math.max(maxAlive, window.BS.enemies().length); }
+      return { maxAlive, cap: window.BS.LEVELS[3].maxAlive, boxes: window.BS.arenaBoxes() };
     });
-    expect(r.maxAlive).toBeGreaterThan(0);
+    expect(r.boxes).toBeGreaterThan(0);                 // L3 arena has a spawn box
+    expect(r.maxAlive).toBeGreaterThan(0);              // it actually spawned reinforcements
     expect(r.maxAlive).toBeLessThanOrEqual(r.cap);      // never exceeds the concurrency cap
   });
 });
@@ -53,7 +43,7 @@ test.describe('P4 · spawner cadence & roster', () => {
 test.describe('P4 · stomp vs hurt classification', () => {
   test('falling onto an enemy kills it and bounces the hero (no life lost)', async ({ page }) => {
     const r = await page.evaluate(() => {
-      window.BS.start(); window.BS.reseed(1); window.BS.setLevel(1); window.BS.setMode('normal');
+      window.BS.start(); window.BS.reseed(1); window.BS.setupArena(1); window.BS.setMode('normal');
       const st = window.BS.state(); st.hp = 3; st.enemies.length = 0;
       const C = window.BS.CONFIG, h = window.BS.hero();
       Object.assign(h, { x: 240, y: C.PLAT_Y, vx: 0, vy: 0, onGround: true, ghost: 0, hurt: 0, dead: false });
@@ -76,7 +66,7 @@ test.describe('P4 · stomp vs hurt classification', () => {
 
   test('side contact hurts the hero (knock left, chips a heart); ghost passes through (neg. control)', async ({ page }) => {
     const r = await page.evaluate(() => {
-      window.BS.start(); window.BS.reseed(1); window.BS.setLevel(1); window.BS.setMode('normal');
+      window.BS.start(); window.BS.reseed(1); window.BS.setupArena(1); window.BS.setMode('normal');
       const st = window.BS.state(); st.enemies.length = 0;
       const C = window.BS.CONFIG, h = window.BS.hero();
       const place = (ghost) => {
@@ -103,7 +93,7 @@ test.describe('P4 · stomp vs hurt classification', () => {
 test.describe('P4 · movement & despawn', () => {
   test('enemies march left and despawn when they drop off the left edge', async ({ page }) => {
     const r = await page.evaluate(() => {
-      window.BS.start(); window.BS.reseed(1); window.BS.setLevel(1);
+      window.BS.start(); window.BS.reseed(1); window.BS.setupArena(1);
       const st = window.BS.state(); st.enemies.length = 0; st.hero.ghost = 1e9; st.bossActive = true;  // ignore hero, no auto-spawns
       window.BS.spawnEnemy('clear');
       const e = window.BS.enemies()[0];
@@ -123,7 +113,7 @@ test.describe('P4 · movement & despawn', () => {
 
   test('L2+ enemies leap interior holes; on L1 they fall in (neg. control)', async ({ page }) => {
     const run = async (level) => page.evaluate((level) => {
-      window.BS.start(); window.BS.reseed(1); window.BS.setLevel(level);
+      window.BS.start(); window.BS.reseed(1); window.BS.setupArena(level);
       const C = window.BS.CONFIG, T = C.TILE, t = window.BS.terrain();
       for (let i = 0; i < t.nCols; i++) t.cols[i] = C.PLAT_Y;
       for (let i = 8; i < 11; i++) t.cols[i] = null;              // interior hole, cols 8-10 (48px)
@@ -155,7 +145,7 @@ test.describe('P4 · movement & despawn', () => {
   test('red enemies move faster than clear ones', async ({ page }) => {
     const r = await page.evaluate(() => {
       const speedOf = (type) => {
-        window.BS.start(); window.BS.reseed(1); window.BS.setLevel(4);
+        window.BS.start(); window.BS.reseed(1); window.BS.setupArena(4);
         const st = window.BS.state(); st.enemies.length = 0; st.hero.ghost = 1e9; st.bossActive = true; // stop auto-spawns
         window.BS.spawnEnemy(type);
         const e = window.BS.enemies()[0]; const x0 = e.x;
