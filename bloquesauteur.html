@@ -369,6 +369,11 @@ const COSTUMES = [
   { id: 10, name: 'Diagonal Camo', price: 150 },
   { id: 11, name: 'Target Spiral', price: 170 },
   { id: 12, name: 'Confetti',      price: 200 },
+  // ── FIFA national football jerseys ──
+  { id: 13, name: 'Canada Kit',      price: 140 },
+  { id: 14, name: 'Switzerland Kit', price: 140 },
+  { id: 15, name: 'Norway Kit',      price: 140 },
+  { id: 16, name: 'Japan Kit',       price: 140 },
 ];
 const costumeKey = (id) => 'costume:' + id;
 const MERCHANT = { landY: CONFIG.PLAT_Y, descendV: 42, riseV: 260, hoverAmp: 22 };
@@ -2175,6 +2180,24 @@ function drawCostume(c, x, y, w, h, id, col) {
     case 12: // confetti (dark base, multicolour flecks)
       c.fillStyle = dark; c.fillRect(ix, iy, iw, ih);
       for (let gy = 0; gy < ih; gy += 2) for (let gx = 0; gx < iw; gx += 2) { c.fillStyle = CONFETTI_COLS[(hash(gx, gy) * CONFETTI_COLS.length) | 0]; c.fillRect(ix + gx + hash(gy, gx), iy + gy, 1.4, 1.4); }
+      break;
+    case 13: // Canada — red kit, white centre band + a maple-leaf hint
+      c.fillStyle = '#d52b1e'; c.fillRect(ix, iy, iw, ih);
+      c.fillStyle = '#fff'; c.fillRect(cx - iw * 0.19, iy, iw * 0.38, ih);
+      c.fillStyle = '#d52b1e'; c.fillRect(cx - 2, cy, 4, 1); c.fillRect(cx - 1, cy - 2, 2, 5);
+      break;
+    case 14: // Switzerland — red kit, white cross
+      c.fillStyle = '#d52b1e'; c.fillRect(ix, iy, iw, ih);
+      c.fillStyle = '#fff'; c.fillRect(cx - 1, cy - ih * 0.28, 2, ih * 0.56); c.fillRect(cx - iw * 0.3, cy - 1, iw * 0.6, 2);
+      break;
+    case 15: // Norway — red kit, white/blue chest band
+      c.fillStyle = '#ba0c2f'; c.fillRect(ix, iy, iw, ih);
+      c.fillStyle = '#fff'; c.fillRect(ix, cy - 2, iw, 4);
+      c.fillStyle = '#00205b'; c.fillRect(ix, cy - 1, iw, 2);
+      break;
+    case 16: // Japan — Samurai blue, red rising-sun disc
+      c.fillStyle = '#0a1e5e'; c.fillRect(ix, iy, iw, ih);
+      c.fillStyle = '#e60026'; c.beginPath(); c.arc(cx, cy, Math.min(iw, ih) * 0.28, 0, 7); c.fill();
       break;
     default: // fallback: plain colour block
       c.fillStyle = col; c.fillRect(ix, iy, iw, ih);
