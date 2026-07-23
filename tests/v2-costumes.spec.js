@@ -4,9 +4,12 @@
 const { test, expect } = require('@playwright/test');
 const { openGame, enterPlayPanel } = require('./helpers');
 
-test('there are 13 costumes (original striped + 12 new)', async ({ page }) => {
+test('there are 17 costumes (patterns + 4 FIFA jerseys)', async ({ page }) => {
   await openGame(page);
-  expect(await page.evaluate(() => window.BS.COSTUMES.length)).toBe(13);
+  expect(await page.evaluate(() => window.BS.COSTUMES.length)).toBe(17);
+  // the jersey kits are present
+  const names = await page.evaluate(() => window.BS.COSTUMES.map((c) => c.name));
+  for (const kit of ['Canada Kit', 'Switzerland Kit', 'Norway Kit', 'Japan Kit']) expect(names).toContain(kit);
 });
 
 test('buying a costume adds it to the owned set, auto-equips it, and persists', async ({ page }) => {
@@ -63,9 +66,9 @@ test('drawCostume renders every costume id without throwing', async ({ page }) =
   await page.evaluate(() => {
     const st = window.BS.state(); st.points = 99999;
     for (const cost of window.BS.COSTUMES) window.BS.buyItem('costume:' + cost.id);
-    window.BS.buildShop();       // draws a shop icon (→ drawCostume) for all 13 costumes
+    window.BS.buildShop();       // draws a shop icon (→ drawCostume) for every costume
     window.BS.buildCostumes();   // draws a picker mannequin (→ drawCostume) for every owned costume
   });
-  expect(await page.evaluate(() => window.BS.costumes().length)).toBe(13);
+  expect(await page.evaluate(() => window.BS.costumes().length)).toBe(17);
   expect(errors).toEqual([]);   // no id path threw
 });
