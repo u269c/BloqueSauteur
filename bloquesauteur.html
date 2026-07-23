@@ -249,7 +249,7 @@ const CONFIG = {
   MAX_JUMP_GAP: 48,                  // 3 tiles — widest hole the hero can clear
   JUMP_MAX_H: 48,                    // 3 tiles — apex height
   // Meta
-  LIVES_START: 3, RESPAWN_GHOST: 2.0,
+  LIVES_START: 5, RESPAWN_GHOST: 2.0,
 };
 
 // 3×3 solid colours + rainbow (index 9), per concept art IMG_0049.
@@ -1586,7 +1586,8 @@ function updateEnemies(dt) {
         if (holeAhead) { e.dir = -e.dir; e.vx = e.dir * e.baseSpeed; }   // patrol: turn at a hole/edge, never fall
       } else if (Game.level > 1 && holeAhead && canLand) {
         e.vy = -ENEMY.leapV; e.vx = e.dir * ENEMY.leapVX; e.onGround = false; e.leaping = true;
-      } else if (e.type === 'yellow') {
+      }
+      if (e.type === 'yellow') {   // yellow hops on a timer — whether patrolling or marching
         e.jumpT -= dt; if (e.jumpT <= 0) { e.vy = -ENEMY.jumpImpulse; e.onGround = false; e.jumpT = 0.9 + Game.rand() * 0.6; }
       }
     } else e.onGround = false;
