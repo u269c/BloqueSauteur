@@ -282,12 +282,15 @@ const LAST_LEVEL = 5;
 // entrance/exit pads don't scale, so this isn't a plain 5x of the hole count).
 // Enemies are 7x the original per-level count, distributed along the run.
 const TRAVERSE = {
-  1: { holes: 35, floats: 30, enemies: 21 },
-  2: { holes: 46, floats: 40, enemies: 35 },
-  3: { holes: 60, floats: 51, enemies: 49 },
-  4: { holes: 76, floats: 65, enemies: 63 },
-  5: { holes: 90, floats: 77, enemies: 84 },
+  1: { holes: 35, floats: 30, enemies: 21, chests: 2 },
+  2: { holes: 46, floats: 40, enemies: 35, chests: 2 },
+  3: { holes: 60, floats: 51, enemies: 49, chests: 3 },
+  4: { holes: 76, floats: 65, enemies: 63, chests: 3 },
+  5: { holes: 90, floats: 77, enemies: 84, chests: 4 },
 };
+// Treasure-chest loot: stomp a chest to pop a mushroom. ~25% of chests are "bad".
+const GOOD_SHROOMS = ['highjump', 'teleport', 'heal', 'money'];
+const BAD_SHROOMS = ['poison', 'swarm'];
 // Boss arena (the single-screen duel at the level's end): exact holes + spawn boxes.
 const ARENA = {
   1: { holes: 0, boxes: 0, boxSpeed: 1 },
@@ -644,7 +647,16 @@ function genLevel(level, seed) {
     const g = mid[i % mid.length], span = Math.max(1, (g.x1 - g.x0) - 12);
     enemies.push({ x: Math.round(g.x0 + 6 + rand() * span), type: roster[Math.floor(rand() * roster.length)] });
   }
-  return { level, seed: seed >>> 0, traverse: true, ground, floats, enemies, width: x, exitX, top, baseTop: top, x0: 0, x1: x, colW: T };
+  // Treasure chests — spread across interior grounds (spaced apart from the enemy pattern);
+  // ~25% roll a "bad" mushroom, the rest a good one.
+  const chests = [];
+  for (let i = 0; i < (p.chests || 0); i++) {
+    const g = mid[Math.floor((i + 0.5) * mid.length / (p.chests || 1)) % mid.length];
+    const bad = rand() < 0.25;
+    const type = bad ? BAD_SHROOMS[Math.floor(rand() * BAD_SHROOMS.length)] : GOOD_SHROOMS[Math.floor(rand() * GOOD_SHROOMS.length)];
+    chests.push({ x: Math.round((g.x0 + g.x1) / 2), top: g.top, bad, type, opened: false });
+  }
+  return { level, seed: seed >>> 0, traverse: true, ground, floats, enemies, chests, width: x, exitX, top, baseTop: top, x0: 0, x1: x, colW: T };
 }
 const genArena = genTerrain;   // the boss arena is the classic single-screen terrain
 // Ground top at world-x for a traversal level (floats excluded), or null over a hole.
@@ -705,6 +717,7 @@ const Game = {
   levelHearts: 0,       // hearts earned by clearing levels (Easy/Normal, per-run)
   heartAnim: null,      // {t, dur} — heart-insert HUD animation
   particles: [],
+  pickups: [],                   // mushrooms popped from opened chests (world-space)
   shakeT: 0, shakeMag: 0,
   combo: 0,                      // airborne kill chain (resets on landing)
   floaters: [],                  // rising +points / xN combo texts
@@ -724,6 +737,7 @@ const Game = {
     shieldT: 0, shieldCd: 0,   // spiked-shield active window / cooldown
     dodgeT: 0, dodgeCd: 0,     // dodge untouchable window / cooldown
     strong: false, frozen: 0,  // strong-hit dive in progress / scream-freeze timer
+    dizzy: 0, bigJump: false,  // poison-mushroom wobble timer / pending 8x-high jump
   },
 };
 
@@ -804,6 +818,7 @@ function buildLevel() {
   Game.theme = { world, sky };
   Game.hitThisLevel = false;
   Game.enemies = [];
+  Game.pickups = [];
   Game.boss = null;
   Game.bossActive = false;
   Game.spawnT = (LEVELS[Game.level] || LEVELS[1]).spawnEvery * 0.5 / (MODES[Game.mode].spawnMul || 1);
@@ -811,7 +826,7 @@ function buildLevel() {
   Object.assign(Game.hero, {
     x: sx, y: Game.levelData.top, vx: 0, vy: 0,
     onGround: true, coyote: 0, jumpBuf: 0, jumping: false, hurt: 0, knock: 0, ghost: 0, dead: false,
-    airJumps: 0, shieldT: 0, shieldCd: 0, dodgeT: 0, dodgeCd: 0, strong: false, frozen: 0,
+    airJumps: 0, shieldT: 0, shieldCd: 0, dodgeT: 0, dodgeCd: 0, strong: false, frozen: 0, dizzy: 0, bigJump: false,
   });
 }
 // Reached the level exit → lock the camera into the single-screen boss arena and fight.
@@ -821,11 +836,12 @@ function enterBossArena() {
   Game.terrain = genArena(Game.level, Game.seed);
   Game.cam.x = 0;
   Game.enemies = [];
+  Game.pickups = [];
   const sx = C.PLAT_X0 + 30, sy = surfaceAt(Game.terrain, sx) ?? C.PLAT_Y;
   Object.assign(Game.hero, {
     x: sx, y: sy, vx: 0, vy: 0,
     onGround: true, coyote: 0, jumpBuf: 0, jumping: false, hurt: 0, knock: 0, ghost: 0, dead: false,
-    airJumps: 0, shieldT: 0, shieldCd: 0, dodgeT: 0, dodgeCd: 0, strong: false, frozen: 0,
+    airJumps: 0, shieldT: 0, shieldCd: 0, dodgeT: 0, dodgeCd: 0, strong: false, frozen: 0, dizzy: 0, bigJump: false,
   });
   activateBoss();
 }
@@ -836,7 +852,7 @@ function respawnHero() {
   else { sx = findSafeX(Game.terrain); sy = surfaceAt(Game.terrain, sx) ?? C.PLAT_Y; }
   Object.assign(h, {
     x: sx, y: sy, vx: 0, vy: 0,
-    onGround: true, coyote: 0, jumpBuf: 0, jumping: false, hurt: 0, knock: 0, dead: false, strong: false, frozen: 0,
+    onGround: true, coyote: 0, jumpBuf: 0, jumping: false, hurt: 0, knock: 0, dead: false, strong: false, frozen: 0, dizzy: 0, bigJump: false,
     ghost: C.RESPAWN_GHOST,        // 2s ghostly invincibility — enemies pass through
   });
 }
@@ -1546,6 +1562,71 @@ function spawnPlaced(p) {
   });
 }
 
+// Drop `n` monsters onto the ground just ahead of the hero (Monster-Attracting mushroom).
+function spawnSwarm(n) {
+  const h = Game.hero, lvl = Game.levelData, L = LEVELS[Game.level] || LEVELS[1], dir = h.face || 1;
+  for (let i = 0; i < n; i++) {
+    const x = h.x + dir * (28 + i * 13), top = groundTopAt(lvl, x);
+    if (top == null) continue;                              // over a hole → skip that slot
+    const type = L.types[Math.floor(Game.rand() * L.types.length)], bs = L.speed * (ENEMY.speedMul[type] || 1);
+    Game.enemies.push({
+      x, y: top, vx: -dir * bs, vy: 0, r: ENEMY.r, type, side: 'swarm', dir: -dir, baseSpeed: bs,
+      onGround: true, leaping: false, alive: true, trail: [], trailT: 0, patrol: true,
+      jumpT: 0.4 + Game.rand() * 0.6, spikes: Game.rand() < 0.5 ? 3 : 5, gaze: -1,
+    });
+  }
+}
+// Apply a collected mushroom's effect.
+function applyMushroom(type) {
+  const h = Game.hero;
+  switch (type) {
+    case 'heal':     Game.heartsBought += 2; Game.hp = Math.min(maxHearts(), Game.hp + 2); addFloater(h.x, h.y - 20, '+2 ♥', '#e0392f'); Audio.sfx('lifeUp'); break;
+    case 'money':    Game.points += 25; addFloater(h.x, h.y - 20, '+25', '#f4d03f'); Audio.sfx('buy'); break;
+    case 'highjump': h.bigJump = true; addFloater(h.x, h.y - 20, 'JUMP ×8', '#7cb342'); Audio.sfx('jump'); break;
+    case 'teleport': addFloater(h.x, h.y - 20, '→ BOSS', '#8fd0ff'); Audio.sfx('bossSpawn'); enterBossArena(); break;
+    case 'poison':   h.dizzy = 2.0; addFloater(h.x, h.y - 20, 'DIZZY…', '#b06cff'); Audio.sfx('hurt'); break;
+    case 'swarm':    spawnSwarm(10); addFloater(h.x, h.y - 20, 'SWARM!', '#e0392f'); Audio.sfx('bossSpawn'); shake(6); break;
+  }
+}
+function openChest(ch) {
+  ch.opened = true;
+  Game.pickups.push({ x: ch.x, y: ch.top - 16, type: ch.type, t: 0, dead: false });
+  spawnBurst(ch.x, ch.top - 8, ch.bad ? '#b06cff' : '#ffd24a', 14); shake(3); Audio.sfx('buy');
+}
+// End of the poison wobble: stumble into the nearest hole (a fall), or just respawn if none.
+function dizzyFall() {
+  const h = Game.hero, lvl = Game.levelData;
+  let holeX = null, best = Infinity;
+  if (lvl && lvl.ground) for (let i = 0; i < lvl.ground.length - 1; i++) {
+    const a = lvl.ground[i].x1, b = lvl.ground[i + 1].x0;
+    if (b > a) { const cx = (a + b) / 2; if (Math.abs(cx - h.x) < best) { best = Math.abs(cx - h.x); holeX = cx; } }
+  }
+  if (holeX != null) { h.x = holeX; h.onGround = false; h.vy = 20; }   // falls → heroDie next frames
+  else heroDie();                                                      // no hole around → respawn as if fallen
+}
+// Chests (stomp to open) + mushroom pickups (touch to collect). Traverse only.
+function updatePickables(dt) {
+  const h = Game.hero, lvl = Game.levelData;
+  if (Game.phase === 'traverse' && lvl && lvl.chests) {
+    for (const ch of lvl.chests) {
+      if (ch.opened) continue;
+      const cw = 14, ctop = ch.top - 12;
+      if (h.x + h.w / 2 > ch.x - cw / 2 && h.x - h.w / 2 < ch.x + cw / 2 && h.y > ctop && h.y - h.h < ch.top) {
+        if (h.vy > 0 && h.y < ch.top - 3) { h.vy = -ENEMY.bounce; h.onGround = false; h.jumping = true; openChest(ch); }   // stomp opens it
+      }
+    }
+  }
+  if (!Game.pickups.length) return;
+  for (const pk of Game.pickups) {
+    pk.t += dt;
+    const py = pk.y + Math.sin(pk.t * 6) * 2;
+    if (!pk.dead && pk.t > 0.1 && h.x + h.w / 2 > pk.x - 6 && h.x - h.w / 2 < pk.x + 6 && h.y > py - 12 && h.y - h.h < py + 6) {
+      pk.dead = true; applyMushroom(pk.type);
+    }
+  }
+  Game.pickups = Game.pickups.filter((p) => !p.dead);
+}
+
 function updateEnemies(dt) {
   const C = CONFIG, ter = Game.terrain, L = LEVELS[Game.level] || LEVELS[1], h = Game.hero;
 
@@ -1755,10 +1836,11 @@ function update(dt) {
   if (h.shieldCd > 0) h.shieldCd = Math.max(0, h.shieldCd - dt);
   if (h.dodgeCd > 0) h.dodgeCd = Math.max(0, h.dodgeCd - dt);
   if (h.frozen > 0) h.frozen = Math.max(0, h.frozen - dt);
+  if (h.dizzy > 0) { h.dizzy = Math.max(0, h.dizzy - dt); if (h.dizzy === 0) dizzyFall(); }   // poison wobble → stumble into a hole
   h.coyote = h.onGround ? C.COYOTE : Math.max(0, h.coyote - dt);
   h.jumpBuf = Input.consumeJump() ? C.JUMP_BUFFER : Math.max(0, h.jumpBuf - dt);
   const downPressed = Input.consumeDown();
-  const frozen = h.frozen > 0;   // scream-frozen: can't act (but still vulnerable)
+  const frozen = h.frozen > 0 || h.dizzy > 0;   // scream-freeze or poison-dizzy: can't act (still vulnerable)
 
   // ── Dodge (hold LEFT+RIGHT): spin untouchable in place, cannot fall.
   //    Lasts as long as both are held, up to DODGE_TIME (5s), then cooldown. ──
@@ -1791,14 +1873,16 @@ function update(dt) {
     if (dir !== 0) h.face = dir;
   }
 
-  // jump (ground/coyote) + optional mid-air double jump
+  // jump (ground/coyote) + optional mid-air double jump. A high-jump mushroom makes the
+  // NEXT jump ~8x higher (velocity × √8 under the same gravity).
   if (frozen) h.jumpBuf = 0;
+  const jv = h.bigJump ? C.JUMP_V * 2.83 : C.JUMP_V;
   if (h.jumpBuf > 0 && (h.onGround || h.coyote > 0)) {
-    h.vy = -C.JUMP_V; h.onGround = false; h.coyote = 0; h.jumpBuf = 0; h.jumping = true;
+    h.vy = -jv; h.onGround = false; h.coyote = 0; h.jumpBuf = 0; h.jumping = true; h.bigJump = false;
     h.airJumps = Game.owned.doubleJump ? 1 : 0;   // grant an air jump on takeoff
     Audio.sfx('jump');
   } else if (h.jumpBuf > 0 && !h.onGround && h.airJumps > 0) {
-    h.vy = -C.JUMP_V; h.airJumps--; h.jumpBuf = 0; h.jumping = true;
+    h.vy = -jv; h.airJumps--; h.jumpBuf = 0; h.jumping = true; h.bigJump = false;
     Audio.sfx('jump'); spawnBurst(h.x, h.y - 2, '#cfe8ff', 6);
   }
 
@@ -1824,6 +1908,7 @@ function update(dt) {
     if (!h.dead && h.x >= Game.levelData.exitX) { enterBossArena(); return; }
   }
 
+  updatePickables(dt);
   updateEnemies(dt);
   updateBoss(dt);
 }
@@ -2448,6 +2533,32 @@ function drawSpawner(x) {
   ctx.fillRect(x - 9, sy + 4, 18, 3);
 }
 
+// Treasure chest sitting on the ground (closed → sparkling; opened → empty lid up).
+function drawChest(ch) {
+  const w = 14, h = 12, bx = ch.x - w / 2, by = ch.top - h;
+  ctx.fillStyle = '#6b4423'; ctx.fillRect(bx, by + 4, w, h - 4);                 // body
+  ctx.fillStyle = '#e0a92e'; ctx.fillRect(bx, by + 7, w, 2); ctx.fillRect(ch.x - 1, by + 4, 2, h - 4);   // gold bands
+  if (!ch.opened) {
+    ctx.fillStyle = '#7a4e28'; ctx.fillRect(bx, by, w, 5);                       // closed lid
+    ctx.fillStyle = '#8a5a30'; ctx.fillRect(bx, by, w, 1);
+    ctx.fillStyle = '#e0a92e'; ctx.fillRect(ch.x - 1, by + 3, 2, 3);             // lock
+    const s = 0.4 + 0.4 * Math.sin(Game.t * 4);                                 // sparkle hint
+    ctx.fillStyle = `rgba(255,240,180,${s})`; ctx.fillRect(bx - 1, by - 1, 1, 1); ctx.fillRect(bx + w, by, 1, 1);
+  } else {
+    ctx.fillStyle = '#7a4e28'; ctx.fillRect(bx, by - 3, w, 3);                   // lid flipped up
+    ctx.fillStyle = '#2a1a0e'; ctx.fillRect(bx + 1, by + 3, w - 2, 2);          // empty interior
+  }
+}
+const SHROOM_COL = { poison: '#a24bd6', highjump: '#57c04a', teleport: '#38b6d6', heal: '#e0392f', money: '#e0a92e', swarm: '#d6552e' };
+// A floating mushroom pickup (cap colour keys the effect).
+function drawPickup(pk) {
+  const x = pk.x, y = pk.y + Math.sin(pk.t * 6) * 2, col = SHROOM_COL[pk.type] || '#fff';
+  ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.beginPath(); ctx.arc(x, y - 3, 8, 0, 7); ctx.fill();   // glow
+  ctx.fillStyle = '#f2e9d0'; ctx.fillRect(x - 2, y - 3, 4, 5);                                          // stem
+  ctx.fillStyle = col; ctx.beginPath(); ctx.arc(x, y - 3, 5, Math.PI, 0); ctx.fill(); ctx.fillRect(x - 5, y - 3, 10, 1);   // cap
+  ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fillRect(x - 3, y - 5, 1.5, 1.5); ctx.fillRect(x + 1.5, y - 6, 1.5, 1.5); ctx.fillRect(x - 1, y - 4, 1.5, 1.5);
+}
+
 function drawMerchant() {
   const m = Game.merchant; if (!m) return;
   const x = Math.round(m.x), y = Math.round(m.y);
@@ -2486,6 +2597,7 @@ function render() {
   ctx.save();
   ctx.translate(-Math.round(Game.cam.x), 0);
   drawTerrain();
+  if (Game.phase === 'traverse' && Game.levelData && Game.levelData.chests) for (const ch of Game.levelData.chests) drawChest(ch);
   // Spawn box(es) — only during the boss duel; count per level (+RAGE side).
   if (Game.phase === 'boss' && Game.bossActive) {
     const boxes = arenaBoxes();
@@ -2494,6 +2606,7 @@ function render() {
   }
   const live = Game.scene === 'PLAY' || Game.scene === 'INTRO' || Game.scene === 'CLEAR' || Game.scene === 'SHOP';
   if (live) { drawEnemies(); drawBoss(); drawHero(); }
+  for (const pk of Game.pickups) drawPickup(pk);
   if (Game.scene === 'SHOP') drawMerchant();
   drawParticles();
   ctx.restore();
@@ -2507,7 +2620,20 @@ function render() {
   else if (Game.scene === 'VICTORY') centerText([{ t: 'VICTORY!', big: true, color: '#f4d03f' }, { t: 'you conquered the tower', color: '#eee8d5' }, { t: MODES[Game.mode].name, color: '#93a1a1' }, { t: 'tap to return to title', color: '#93a1a1' }]);
 
   ctx.restore();
+  if (Game.hero.dizzy > 0) applyWave();   // poison mushroom: ripple the whole composited frame
   updateShieldButton();
+}
+// Post-process ripple for the poison-mushroom wobble: snapshot the frame, then re-blit it
+// in thin horizontal strips shifted by a travelling sine wave.
+const waveBuf = document.createElement('canvas');
+function applyWave() {
+  const W = CONFIG.W, H = CONFIG.H;
+  if (waveBuf.width !== W) { waveBuf.width = W; waveBuf.height = H; }
+  const wc = waveBuf.getContext('2d');
+  wc.clearRect(0, 0, W, H); wc.drawImage(canvas, 0, 0, W, H);
+  ctx.clearRect(0, 0, W, H);
+  const amp = 7, t = Game.t * 7;
+  for (let y = 0; y < H; y += 2) { const dx = Math.sin(y * 0.22 + t) * amp; ctx.drawImage(waveBuf, 0, y, W, 2, dx, y, W, 2); }
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -2600,6 +2726,9 @@ window.BS = {
   heroHurt, respawnHero,
   enemies: () => Game.enemies,
   spawnEnemy,
+  chests: () => (Game.levelData ? Game.levelData.chests : []),
+  pickups: () => Game.pickups,
+  applyMushroom, openChest,
   boss: () => Game.boss,
   activateBoss,
   bossHit: () => Game.boss && bossHit(Game.boss),
