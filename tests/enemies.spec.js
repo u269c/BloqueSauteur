@@ -47,8 +47,7 @@ test.describe('P4 · stomp vs hurt classification', () => {
       const st = window.BS.state(); st.hp = 3; st.enemies.length = 0;
       const C = window.BS.CONFIG, h = window.BS.hero();
       Object.assign(h, { x: 240, y: C.PLAT_Y, vx: 0, vy: 0, onGround: true, ghost: 0, hurt: 0, dead: false });
-      st.bossActive = true;              // stop auto-spawns for a clean single enemy
-      window.BS.spawnEnemy('clear');
+      window.BS.spawnEnemy('clear');     // setupArena is already spawn-free (no active boss)
       const e = window.BS.enemies()[0];
       Object.assign(e, { x: 240, y: C.PLAT_Y, vx: 0, vy: 0, onGround: true });
       // place hero overlapping the enemy's top, descending

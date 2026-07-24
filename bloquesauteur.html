@@ -737,7 +737,7 @@ const Game = {
     shieldT: 0, shieldCd: 0,   // spiked-shield active window / cooldown
     dodgeT: 0, dodgeCd: 0,     // dodge untouchable window / cooldown
     strong: false, frozen: 0,  // strong-hit dive in progress / scream-freeze timer
-    dizzy: 0, bigJump: false,  // poison-mushroom wobble timer / pending 8x-high jump
+    dizzy: 0, bigJump: 0,  // poison-mushroom wobble timer / count of pending 8x-high jumps
   },
 };
 
@@ -826,7 +826,7 @@ function buildLevel() {
   Object.assign(Game.hero, {
     x: sx, y: Game.levelData.top, vx: 0, vy: 0,
     onGround: true, coyote: 0, jumpBuf: 0, jumping: false, hurt: 0, knock: 0, ghost: 0, dead: false,
-    airJumps: 0, shieldT: 0, shieldCd: 0, dodgeT: 0, dodgeCd: 0, strong: false, frozen: 0, dizzy: 0, bigJump: false,
+    airJumps: 0, shieldT: 0, shieldCd: 0, dodgeT: 0, dodgeCd: 0, strong: false, frozen: 0, dizzy: 0, bigJump: 0,
   });
 }
 // Reached the level exit → lock the camera into the single-screen boss arena and fight.
@@ -841,7 +841,7 @@ function enterBossArena() {
   Object.assign(Game.hero, {
     x: sx, y: sy, vx: 0, vy: 0,
     onGround: true, coyote: 0, jumpBuf: 0, jumping: false, hurt: 0, knock: 0, ghost: 0, dead: false,
-    airJumps: 0, shieldT: 0, shieldCd: 0, dodgeT: 0, dodgeCd: 0, strong: false, frozen: 0, dizzy: 0, bigJump: false,
+    airJumps: 0, shieldT: 0, shieldCd: 0, dodgeT: 0, dodgeCd: 0, strong: false, frozen: 0, dizzy: 0, bigJump: 0,
   });
   activateBoss();
 }
@@ -852,7 +852,7 @@ function respawnHero() {
   else { sx = findSafeX(Game.terrain); sy = surfaceAt(Game.terrain, sx) ?? C.PLAT_Y; }
   Object.assign(h, {
     x: sx, y: sy, vx: 0, vy: 0,
-    onGround: true, coyote: 0, jumpBuf: 0, jumping: false, hurt: 0, knock: 0, dead: false, strong: false, frozen: 0, dizzy: 0, bigJump: false,
+    onGround: true, coyote: 0, jumpBuf: 0, jumping: false, hurt: 0, knock: 0, dead: false, strong: false, frozen: 0, dizzy: 0, bigJump: 0,
     ghost: C.RESPAWN_GHOST,        // 2s ghostly invincibility — enemies pass through
   });
 }
@@ -1422,6 +1422,8 @@ function addFloater(x, y, text, color) {
 // Award a monster kill. Airborne kills build a combo: the k-th airborne kill in a
 // chain awards 2*min(k,10)-1 points (a chain of N totals N², capped at the 10x tier).
 function addKill(x, y, color) {
+  // No point-farming during the boss duel: spawn-box minions score nothing there.
+  if (Game.bossActive) { Audio.sfx('stomp'); spawnBurst(x, y, color, 12); return; }
   let award = 1;
   if (!Game.hero.onGround) {
     Game.combo += 1;
@@ -1582,7 +1584,7 @@ function applyMushroom(type) {
   switch (type) {
     case 'heal':     Game.heartsBought += 2; Game.hp = Math.min(maxHearts(), Game.hp + 2); addFloater(h.x, h.y - 20, '+2 ♥', '#e0392f'); Audio.sfx('lifeUp'); break;
     case 'money':    Game.points += 25; addFloater(h.x, h.y - 20, '+25', '#f4d03f'); Audio.sfx('buy'); break;
-    case 'highjump': h.bigJump = true; addFloater(h.x, h.y - 20, 'JUMP ×8', '#7cb342'); Audio.sfx('jump'); break;
+    case 'highjump': h.bigJump = 5; addFloater(h.x, h.y - 20, 'JUMP ×8 (5)', '#7cb342'); Audio.sfx('jump'); break;
     case 'teleport': addFloater(h.x, h.y - 20, '→ BOSS', '#8fd0ff'); Audio.sfx('bossSpawn'); enterBossArena(); break;
     case 'poison':   h.dizzy = 2.0; addFloater(h.x, h.y - 20, 'DIZZY…', '#b06cff'); Audio.sfx('hurt'); break;
     case 'swarm':    spawnSwarm(10); addFloater(h.x, h.y - 20, 'SWARM!', '#e0392f'); Audio.sfx('bossSpawn'); shake(6); break;
@@ -1874,15 +1876,15 @@ function update(dt) {
   }
 
   // jump (ground/coyote) + optional mid-air double jump. A high-jump mushroom makes the
-  // NEXT jump ~8x higher (velocity × √8 under the same gravity).
+  // NEXT 5 jumps ~8x higher (velocity × √8 under the same gravity).
   if (frozen) h.jumpBuf = 0;
-  const jv = h.bigJump ? C.JUMP_V * 2.83 : C.JUMP_V;
+  const jv = h.bigJump > 0 ? C.JUMP_V * 2.83 : C.JUMP_V;
   if (h.jumpBuf > 0 && (h.onGround || h.coyote > 0)) {
-    h.vy = -jv; h.onGround = false; h.coyote = 0; h.jumpBuf = 0; h.jumping = true; h.bigJump = false;
+    h.vy = -jv; h.onGround = false; h.coyote = 0; h.jumpBuf = 0; h.jumping = true; if (h.bigJump > 0) h.bigJump--;
     h.airJumps = Game.owned.doubleJump ? 1 : 0;   // grant an air jump on takeoff
     Audio.sfx('jump');
   } else if (h.jumpBuf > 0 && !h.onGround && h.airJumps > 0) {
-    h.vy = -jv; h.airJumps--; h.jumpBuf = 0; h.jumping = true; h.bigJump = false;
+    h.vy = -jv; h.airJumps--; h.jumpBuf = 0; h.jumping = true; if (h.bigJump > 0) h.bigJump--;
     Audio.sfx('jump'); spawnBurst(h.x, h.y - 2, '#cfe8ff', 6);
   }
 
