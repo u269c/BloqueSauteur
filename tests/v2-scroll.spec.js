@@ -259,3 +259,17 @@ test.describe('v1.7 · hazards (12 types)', () => {
     expect(await hp(1e9)).toBe(5);              // neg. control: ghostly → passes through
   });
 });
+
+test('no raised ground is higher than a normal jump can reach (fairness)', async ({ page }) => {
+  const r = await page.evaluate(() => {
+    const C = window.BS.CONFIG, TIER = 26;
+    const apex = (C.JUMP_V * C.JUMP_V) / (2 * C.G_HELD);   // max jump height
+    let maxRise = 0;
+    for (let lv = 1; lv <= 5; lv++) for (let s = 0; s < 60; s++) {
+      for (const g of window.BS.genLevel(lv, s).ground) maxRise = Math.max(maxRise, C.PLAT_Y - g.top);
+    }
+    return { maxRise, apex: +apex.toFixed(1), tier: TIER };
+  });
+  expect(r.maxRise).toBeLessThanOrEqual(r.tier);   // never more than one tier up
+  expect(r.tier).toBeLessThan(r.apex);             // …and one tier is jumpable
+});

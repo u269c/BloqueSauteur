@@ -666,7 +666,7 @@ function genLevel(level, seed) {
     }
     // ground run — bigger; on contiguous ground it may rise into a raised plateau (jump onto it)
     const gw = (gwMin + Math.floor(rand() * gwRange)) * T;
-    const gtop = (!gap && rand() < pRaised) ? top - (1 + (rand() < 0.4 ? 1 : 0)) * TIER : top;
+    const gtop = (!gap && rand() < pRaised) ? top - TIER : top;   // exactly 1 tier — always reachable by a normal jump (2 tiers > apex)
     ground.push({ x0: x, x1: x + gw, top: gtop }); x += gw;
   }
   // ── exit ──
