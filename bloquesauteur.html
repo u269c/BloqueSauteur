@@ -303,7 +303,9 @@ const ARENA = {
 };
 const ENEMY = { r: 7, speedMul: { clear: 1, red: 1.7, yellow: 1 }, bounce: 300, jumpImpulse: 205, gravity: 900, leapV: 250, leapVX: 118 };
 const BOSS = {
-  r: 17, hits: 3, iframe: 0.9, returnSpeed: 95, jumpImpulse: 250, freeze: 5,
+  r: 17, hits: 3, iframe: 0.9, returnSpeed: 95, jumpImpulse: 250,
+  freeze: 1.5, screamWarn: 1.5, screamDur: 2.0, screamRadius: 240,   // shorter stun; 1.5s shake warning; avoidable past ½ screen
+
   charge:   { clear: 55, red: 108, yellow: 82, rainbow: 122, volcano: 100 },   // charge speed per level boss
   idleWait: { clear: 1.2, red: 0.9, yellow: 0.9, rainbow: 0.7, volcano: 0.7 }, // pause between attacks
 };
@@ -1313,7 +1315,7 @@ const Audio = {
       case 'buzzGrumpy':this.blip(n('E3'), .18, 'sawtooth', .4, t0); this.blip(n('C3'), .26, 'sawtooth', .4, t0 + .1); break;
       case 'lifeUp':    this.blip(n('C5'), .09, 'square', .4, t0); this.blip(n('E5'), .09, 'square', .4, t0 + .09); this.blip(n('G5'), .09, 'square', .4, t0 + .18); this.blip(n('C6'), .22, 'square', .42, t0 + .27); break;
       // Boss scream: a descending detuned sawtooth screech (mid-pitched, not shrill).
-      case 'scream':    for (let i = 0; i < 5; i++) { const f = n('A4') * Math.pow(0.9, i); this.blip(f, .22, 'sawtooth', .4, t0 + i * .12); this.blip(f * 1.02, .22, 'sawtooth', .3, t0 + i * .12); } break;
+      case 'scream':    for (let i = 0; i < 12; i++) { const f = n('A4') * Math.pow(0.94, i); this.blip(f, .28, 'sawtooth', .38, t0 + i * .16); this.blip(f * 1.02, .28, 'sawtooth', .28, t0 + i * .16); } break;   // ~2s screech
       default:      this.blip(n('A4'), .06, 'square', .3, t0);
     }
   },
@@ -1796,13 +1798,21 @@ function updateBoss(dt) {
         b.stateT -= dt;
         if (b.canScream) { b.screamT -= dt; }
         if (b.stateT <= 0) {
-          if (b.canScream && b.screamT <= 0) { b.state = 'scream'; b.stateT = 0.8; b.screamT = 4 + Game.rand() * 3; Audio.sfx('scream'); if (h.ghost <= 0 && h.dodgeT <= 0 && !h.dead) h.frozen = BOSS.freeze; }
+          if (b.canScream && b.screamT <= 0) { b.state = 'shriek'; b.stateT = BOSS.screamWarn; b.screamT = 4 + Game.rand() * 3; }   // wind-up first (warning)
           else if (b.type === 'rainbow' || b.type === 'volcano') { b.state = 'telegraph'; b.stateT = 0.6; b.feint = Game.rand() < 0.5; }
           else { b.state = 'charge'; b.jumpT = 0.4; }
         }
       }
       break;
-    case 'scream':                            // rears back and screams (freeze already applied)
+    case 'shriek':                            // 1.5s tremble warning — run past ½ screen to be safe
+      b.stateT -= dt;
+      if (b.stateT <= 0) {
+        b.state = 'scream'; b.stateT = BOSS.screamDur;
+        Audio.sfx('scream');
+        if (Math.abs(h.x - b.x) <= BOSS.screamRadius && h.ghost <= 0 && h.dodgeT <= 0 && !h.dead) h.frozen = BOSS.freeze;   // only if close enough
+      }
+      break;
+    case 'scream':                            // 2s scream with expanding sound-wave rings
       b.stateT -= dt;
       if (b.stateT <= 0) { b.state = 'charge'; b.jumpT = 0.35; }
       break;
@@ -2432,7 +2442,8 @@ function drawEnemies() {
 
 function drawBoss() {
   const b = Game.boss; if (!b) return;
-  const cx = b.x, cy = b.y - b.r, r = b.r;
+  const trembleX = b.state === 'shriek' ? (Math.random() * 2 - 1) * 2.5 : 0;   // shake as a scream warning
+  const cx = b.x + trembleX, cy = b.y - b.r, r = b.r;
   const phase2 = b.enraged || b.hits >= Math.ceil(b.maxHits * 2 / 3);   // enraged in the last third (or revived)
   let col = ENEMY_COL[b.type] || '#fff';
   if (b.type === 'rainbow') col = `hsl(${(Game.t * 120) % 360} 90% 60%)`;
@@ -2445,9 +2456,16 @@ function drawBoss() {
     ctx.fillStyle = 'rgba(255,255,255,0.15)';
     ctx.beginPath(); ctx.arc(cx, cy, r + 5 + Math.sin(Game.t * 20) * 2, 0, Math.PI * 2); ctx.fill();
   }
-  // scream: expanding shock rings
+  // shriek wind-up: pulsing red aura (warning to flee)
+  if (b.state === 'shriek') {
+    const pulse = 0.5 + 0.5 * Math.sin(Game.t * 30);
+    ctx.strokeStyle = `rgba(255,60,40,${0.3 + 0.45 * pulse})`; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(cx, cy, r + 4 + pulse * 4, 0, Math.PI * 2); ctx.stroke();
+  }
+  // scream: sound-wave rings expanding out to the impact radius (the danger zone)
   if (b.state === 'scream') {
-    for (let i = 0; i < 3; i++) { const rr = r + 6 + ((Game.t * 60 + i * 12) % 30); ctx.strokeStyle = `rgba(255,80,40,${0.5 - rr / 90})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.stroke(); }
+    const prog = 1 - b.stateT / BOSS.screamDur, R = BOSS.screamRadius;
+    for (let i = 0; i < 3; i++) { const rr = ((prog + i / 3) % 1) * R; ctx.strokeStyle = `rgba(255,90,50,${0.5 * (1 - rr / R)})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx, cy, r + rr, 0, Math.PI * 2); ctx.stroke(); }
   }
   ctx.save();
   if (flash) ctx.globalAlpha = 0.5;
