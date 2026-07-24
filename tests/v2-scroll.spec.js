@@ -198,3 +198,37 @@ test.describe('v1.7 · level tuning (bigger, fewer holes, raised grounds)', () =
     expect(r.onTop).toBe(true);                      // …but jumping gets you onto the plateau
   });
 });
+
+test.describe('v1.7 · climbing (ropes/ladders/vines/chains/poles)', () => {
+  test('climbables appear only on L3+, all five kinds exist; hold ↑ climbs to the top', async ({ page }) => {
+    const r = await page.evaluate(() => {
+      window.BS.freeze(true);
+      const kinds = new Set(); let early = 0;
+      for (let lv = 1; lv <= 5; lv++) for (let s = 0; s < 40; s++) { const cs = window.BS.genLevel(lv, s).climbables || []; if (lv < 3) early += cs.length; cs.forEach((c) => kinds.add(c.kind)); }
+      window.BS.start(); window.BS.reseed(3); window.BS.setLevel(3);
+      const c = window.BS.climbables()[0], h = window.BS.hero(); h.ghost = 1e9;
+      Object.assign(h, { x: c.x, y: c.bot, vx: 0, vy: 0, onGround: true, dead: false });
+      window.BS.Input.reset(); window.BS.Input.press('jump', true);
+      let reachedTop = false;
+      for (let k = 0; k < 500; k++) { window.BS.stepFixed(1); if (Math.abs(h.y - c.top) < 2) reachedTop = true; }
+      window.BS.Input.reset();
+      return { kinds: [...kinds].sort(), early, reachedTop, endY: Math.round(h.y), top: c.top };
+    });
+    expect(r.kinds).toEqual(['chain', 'ladder', 'pole', 'rope', 'vine']);
+    expect(r.early).toBe(0);          // none on levels 1-2
+    expect(r.reachedTop).toBe(true);  // climbed all the way up
+  });
+
+  test('a climbable is ignored without an up/down press (neg. control)', async ({ page }) => {
+    const r = await page.evaluate(() => {
+      window.BS.start(); window.BS.reseed(3); window.BS.setLevel(3);
+      const c = window.BS.climbables()[0], h = window.BS.hero(); h.ghost = 1e9;
+      Object.assign(h, { x: c.x, y: c.bot, vx: 0, vy: 0, onGround: true, dead: false });
+      window.BS.Input.reset();
+      for (let k = 0; k < 60; k++) window.BS.stepFixed(1);
+      return { climbing: h.climbing, y: Math.round(h.y), bot: c.bot };
+    });
+    expect(r.climbing).toBe(false);   // didn't grab on its own
+    expect(r.y).toBe(r.bot);          // stayed on the ground
+  });
+});

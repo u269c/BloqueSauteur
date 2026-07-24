@@ -636,6 +636,7 @@ function genTerrain(level, seed) {
 // avoid a very wide hole. Reaching the exit → boss arena. L2 ends with a sky-climb into a
 // boss void. Enemies + chests are placed along the ground.
 const TIER = 26;   // vertical step between float tiers (comfortably jumpable)
+const CLIMB_SPEED = 74, CLIMB_KINDS = ['rope', 'ladder', 'vine', 'chain', 'pole'];   // hold ↑/↓ to climb
 function genLevel(level, seed) {
   const C = CONFIG, T = C.TILE, top = C.PLAT_Y;
   const rand = mulberry32(((seed >>> 0) ^ Math.imul((level | 0) + 101, 0x9E3779B1)) >>> 0);
@@ -700,6 +701,18 @@ function genLevel(level, seed) {
     const type = bad ? BAD_SHROOMS[Math.floor(rand() * BAD_SHROOMS.length)] : GOOD_SHROOMS[Math.floor(rand() * GOOD_SHROOMS.length)];
     chests.push({ x: Math.round((g.x0 + g.x1) / 2), top: g.top, bad, type, opened: false });
   }
+  // Climbables (L3+): a rope/ladder/vine/chain/pole rising from the ground to a top perch
+  // you climb with ↑/↓. Each gets a small float platform to stand on at the top.
+  const climbables = [];
+  if (level >= 3) {
+    const n = 2 + Math.floor(rand() * 2);
+    for (let i = 0; i < n; i++) {
+      const g = mid[Math.floor(rand() * mid.length)], cx = Math.round((g.x0 + g.x1) / 2);
+      const ctop = g.top - (2 + Math.floor(rand() * 2)) * TIER, kind = CLIMB_KINDS[(level + i) % CLIMB_KINDS.length];
+      climbables.push({ x: cx, top: ctop, bot: g.top, kind });
+      floats.push({ x: cx - 16, y: ctop, w: 32 });   // perch at the top
+    }
+  }
   // The Challenger: a stationary adventurer on L4, ~1/3 through the level.
   let challenger = null;
   if (level === 4) {
@@ -708,7 +721,7 @@ function genLevel(level, seed) {
     for (const seg of ground) if (Math.abs((seg.x0 + seg.x1) / 2 - targetX) < Math.abs((g.x0 + g.x1) / 2 - targetX)) g = seg;
     challenger = { x: Math.round((g.x0 + g.x1) / 2), top: g.top, done: false };
   }
-  return { level, seed: seed >>> 0, traverse: true, ground, floats, enemies, chests, bossPit, bossSign, challenger, width: x, exitX, top, baseTop: top, x0: 0, x1: x, colW: T };
+  return { level, seed: seed >>> 0, traverse: true, ground, floats, enemies, chests, climbables, bossPit, bossSign, challenger, width: x, exitX, top, baseTop: top, x0: 0, x1: x, colW: T };
 }
 const genArena = genTerrain;   // the boss arena is the classic single-screen terrain
 // Ground top at world-x for a traversal level (floats excluded), or null over a hole.
@@ -792,7 +805,7 @@ const Game = {
     shieldT: 0, shieldCd: 0,   // spiked-shield active window / cooldown
     dodgeT: 0, dodgeCd: 0,     // dodge untouchable window / cooldown
     strong: false, frozen: 0,  // strong-hit dive in progress / scream-freeze timer
-    dizzy: 0, bigJump: 0,  // poison-mushroom wobble timer / count of pending 8x-high jumps
+    dizzy: 0, bigJump: 0, climbing: false,  // poison-mushroom wobble timer / count of pending 8x-high jumps
   },
 };
 
@@ -882,7 +895,7 @@ function buildLevel() {
   Object.assign(Game.hero, {
     x: sx, y: Game.levelData.top, vx: 0, vy: 0,
     onGround: true, coyote: 0, jumpBuf: 0, jumping: false, hurt: 0, knock: 0, ghost: 0, dead: false,
-    airJumps: 0, shieldT: 0, shieldCd: 0, dodgeT: 0, dodgeCd: 0, strong: false, frozen: 0, dizzy: 0, bigJump: 0,
+    airJumps: 0, shieldT: 0, shieldCd: 0, dodgeT: 0, dodgeCd: 0, strong: false, frozen: 0, dizzy: 0, bigJump: 0, climbing: false,
   });
 }
 // Reached the level exit → lock the camera into the single-screen boss arena and fight.
@@ -897,7 +910,7 @@ function enterBossArena() {
   Object.assign(Game.hero, {
     x: sx, y: sy, vx: 0, vy: 0,
     onGround: true, coyote: 0, jumpBuf: 0, jumping: false, hurt: 0, knock: 0, ghost: 0, dead: false,
-    airJumps: 0, shieldT: 0, shieldCd: 0, dodgeT: 0, dodgeCd: 0, strong: false, frozen: 0, dizzy: 0, bigJump: 0,
+    airJumps: 0, shieldT: 0, shieldCd: 0, dodgeT: 0, dodgeCd: 0, strong: false, frozen: 0, dizzy: 0, bigJump: 0, climbing: false,
   });
   activateBoss();
 }
@@ -908,7 +921,7 @@ function respawnHero() {
   else { sx = findSafeX(Game.terrain); sy = surfaceAt(Game.terrain, sx) ?? C.PLAT_Y; }
   Object.assign(h, {
     x: sx, y: sy, vx: 0, vy: 0,
-    onGround: true, coyote: 0, jumpBuf: 0, jumping: false, hurt: 0, knock: 0, dead: false, strong: false, frozen: 0, dizzy: 0, bigJump: 0,
+    onGround: true, coyote: 0, jumpBuf: 0, jumping: false, hurt: 0, knock: 0, dead: false, strong: false, frozen: 0, dizzy: 0, bigJump: 0, climbing: false,
     ghost: C.RESPAWN_GHOST,        // 2s ghostly invincibility — enemies pass through
   });
 }
@@ -2036,6 +2049,21 @@ function update(dt) {
   const downPressed = Input.consumeDown();
   const frozen = h.frozen > 0 || h.dizzy > 0;   // scream-freeze or poison-dizzy: can't act (still vulnerable)
 
+  // ── Climbing (ropes/ladders/vines/chains/poles): hold ↑/↓ to climb; ←/→ to dismount ──
+  if (Game.phase === 'traverse' && Game.levelData.climbables && !frozen) {
+    const onClimb = Game.levelData.climbables.find((c) => Math.abs(h.x - c.x) < 8 && h.y - h.h < c.bot && h.y > c.top - 4);
+    if (h.climbing && (!onClimb || Input.left || Input.right)) h.climbing = false;   // dismount (fall back to normal control)
+    else if (onClimb && !h.climbing && (Input.jumpHeld || Input.down)) { h.climbing = true; h.x = onClimb.x; }
+    if (h.climbing && onClimb) {
+      h.vx = 0; h.vy = 0; h.onGround = false; h.jumpBuf = 0;
+      h.y += ((Input.jumpHeld ? -1 : 0) + (Input.down ? 1 : 0)) * CLIMB_SPEED * dt;
+      if (h.y <= onClimb.top) { h.y = onClimb.top; h.climbing = false; h.onGround = true; }   // reached the top perch
+      if (h.y > onClimb.bot) h.y = onClimb.bot;                                               // can't go below the ground
+      updatePickables(dt); updateEnemies(dt); updateBoss(dt);
+      return;
+    }
+  }
+
   // ── Dodge (hold LEFT+RIGHT): spin untouchable in place, cannot fall.
   //    Lasts as long as both are held, up to DODGE_TIME (5s), then cooldown. ──
   if (h.dodgeT > 0) {
@@ -2354,8 +2382,33 @@ function drawTerrain() {
   // Holes (gaps between segments) stay open → sky/hazard shows through.
   const segs = ter.traverse ? ter.ground : ter.segments;
   for (const s of segs) { if (fn) fn(s, d); else segDefault(s, d); }
+  if (ter.traverse && ter.climbables) for (const c of ter.climbables) drawClimbable(c);
   if (ter.traverse) for (const f of ter.floats) drawFloat(f, d);
   if (ter.traverse && ter.bossSign) drawBossSign(ter.bossSign);
+}
+// A climbable — rope / ladder / vine / chain / pole — from its top perch down to the ground.
+function drawClimbable(c) {
+  const x = c.x, y0 = c.top, y1 = c.bot;
+  ctx.save();
+  if (c.kind === 'ladder') {
+    ctx.fillStyle = '#8a5a30'; ctx.fillRect(x - 5, y0, 2, y1 - y0); ctx.fillRect(x + 3, y0, 2, y1 - y0);   // rails
+    ctx.fillStyle = '#a87a44'; for (let y = y0 + 3; y < y1; y += 7) ctx.fillRect(x - 5, y, 10, 2);          // rungs
+  } else if (c.kind === 'vine') {
+    ctx.strokeStyle = '#2e7d32'; ctx.lineWidth = 2; ctx.beginPath();
+    for (let y = y0; y <= y1; y += 3) { const wx = x + Math.sin(y * 0.25) * 3; if (y === y0) ctx.moveTo(wx, y); else ctx.lineTo(wx, y); } ctx.stroke();
+    ctx.fillStyle = '#7cb342'; for (let y = y0 + 5; y < y1; y += 11) { const wx = x + Math.sin(y * 0.25) * 3; ctx.beginPath(); ctx.ellipse(wx + 4, y, 3, 1.6, 0.6, 0, 7); ctx.fill(); }   // leaves
+  } else if (c.kind === 'chain') {
+    ctx.strokeStyle = '#9aa0ab'; ctx.lineWidth = 1.5; for (let y = y0; y < y1; y += 5) { ctx.beginPath(); ctx.ellipse(x, y + 2.5, 2.4, 3, 0, 0, 7); ctx.stroke(); }
+  } else if (c.kind === 'pole') {
+    ctx.fillStyle = '#b0b6c0'; ctx.fillRect(x - 2, y0, 4, y1 - y0); ctx.fillStyle = '#e6ecf3'; ctx.fillRect(x - 2, y0, 1, y1 - y0);
+    ctx.fillStyle = '#e0392f'; for (let y = y0 + 4; y < y1; y += 10) ctx.fillRect(x - 2, y, 4, 3);   // barber stripes
+  } else {   // rope (default)
+    ctx.strokeStyle = '#c9a24a'; ctx.lineWidth = 2; ctx.beginPath();
+    for (let y = y0; y <= y1; y += 3) { const wx = x + Math.sin(y * 0.2) * 1.5; if (y === y0) ctx.moveTo(wx, y); else ctx.lineTo(wx, y); } ctx.stroke();
+    ctx.fillStyle = '#8a6a2a'; for (let y = y0 + 4; y < y1; y += 8) ctx.fillRect(x - 2, y, 4, 1);   // knots
+  }
+  ctx.fillStyle = '#6b4423'; ctx.fillRect(x - 4, y0 - 2, 8, 2);   // top anchor
+  ctx.restore();
 }
 // Neon "BOSS" sign + flashing down-arrow marking the L2 sky-climb void to drop into.
 function drawBossSign(sg) {
@@ -3092,6 +3145,7 @@ window.BS = {
   equipCostume: (id) => { Game.hero.costumeIdx = id; Save.save(); },
   // The Challenger / pickleball
   challenger: () => Game.levelData && Game.levelData.challenger,
+  climbables: () => Game.levelData && Game.levelData.climbables,
   startPickle, setupPickle, endPickle, resumePickle,
   pickle: () => Game.pickle,
   pickleWins: () => Game.pickleWins,
