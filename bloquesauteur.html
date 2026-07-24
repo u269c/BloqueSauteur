@@ -654,15 +654,39 @@ function genLevel(level, seed) {
   const rand = mulberry32(((seed >>> 0) ^ Math.imul((level | 0) + 101, 0x9E3779B1)) >>> 0);
   const p = TRAVERSE[level] || TRAVERSE[1];
   const roster = (LEVELS[level] || LEVELS[1]).types;
-  const ground = [], floats = [], enemies = [], chests = [];
+  const ground = [], floats = [], enemies = [], chests = [], climbables = [], hazards = [];
   let x = 0;
   const ENTRANCE = Math.round(C.W * 0.55);                 // safe run-up: no holes near the start
   ground.push({ x0: 0, x1: ENTRANCE, top }); x = ENTRANCE;
   const maxTier = Math.min(4, 1 + Math.floor(level / 1.5));
   const pHole = 0.14, pStair = Math.min(0.26, 0.05 + level * 0.04), pRaised = 0.34;   // fewer holes; more solid + raised ground
   const gwMin = level === 2 ? 9 : 6, gwRange = level === 2 ? 6 : 5;                    // bigger platforms (esp. L2)
+  // Sky gauntlet (L2+): a rope up to a complex float maze over a void, with hazards forcing
+  // you up/down, and a rope down at the far side. Guarantee 1, allow up to 3.
+  let gauntletsLeft = level >= 2 ? 1 + Math.floor(rand() * 3) : 0;
+  const emitGauntlet = () => {
+    const hi = top - 4 * TIER;                              // rope-top / perch tier
+    climbables.push({ x: x - 8, top: hi, bot: top, kind: 'rope' }); floats.push({ x: x - 24, y: hi, w: 32 });   // entry rope + perch
+    const steps = 5 + Math.floor(rand() * 3), sw = 26 + Math.floor(rand() * 6);
+    let tier = 3;
+    for (let s = 0; s < steps; s++) {
+      const useTier = (s === 0 || s === steps - 1) ? 3 : tier;   // ends adjacent to the tier-4 perches
+      const fx = Math.round(x + s * sw), fy = top - useTier * TIER;
+      floats.push({ x: fx, y: fy, w: 26 });
+      if (s > 0 && s < steps - 1 && rand() < 0.7) {         // a mid-air hazard to dodge between hops
+        const air = ['fireball', 'saw', 'boomerang', 'spore', 'bees', 'tornado'];
+        hazards.push({ x: fx + Math.round(sw / 2), top: fy, kind: air[Math.floor(rand() * air.length)], ph: rand() * 3, range: 12 });
+      }
+      tier = Math.max(2, Math.min(4, tier + (rand() < 0.5 ? 1 : -1)));   // zig-zag ±1 tier (always jumpable, forces up/down)
+    }
+    x += steps * sw;
+    climbables.push({ x: x + 8, top: hi, bot: top, kind: 'rope' }); floats.push({ x: x - 8, y: hi, w: 32 });   // exit rope (climb down) + top perch
+    gauntletsLeft--;
+  };
   for (let i = 0; i < p.chunks; i++) {
     let gap = false;
+    if (gauntletsLeft > 0 && ((i >= p.chunks - gauntletsLeft) || rand() < 0.18)) { emitGauntlet(); gap = true; }
+    else {
     const r = rand();
     if (r < pStair && maxTier >= 2) {
       // large hole crossed by a float PYRAMID (tiers 1..peak..1). The base floats overlap the
@@ -675,6 +699,7 @@ function genLevel(level, seed) {
       const hw = (2 + Math.floor(rand() * 2)) * T;
       if (rand() < 0.6) floats.push({ x: Math.round(x + hw / 2 - 14), y: top - (1 + Math.floor(rand() * 2)) * TIER, w: 28 });
       x += hw; gap = true;
+    }
     }
     // ground run — bigger; on contiguous ground it may rise into a raised plateau (jump onto it)
     const gw = (gwMin + Math.floor(rand() * gwRange)) * T;
@@ -715,7 +740,6 @@ function genLevel(level, seed) {
   }
   // Climbables (L3+): a rope/ladder/vine/chain/pole rising from the ground to a top perch
   // you climb with ↑/↓. Each gets a small float platform to stand on at the top.
-  const climbables = [];
   if (level >= 3) {
     const n = 2 + Math.floor(rand() * 2);
     for (let i = 0; i < n; i++) {
@@ -725,8 +749,7 @@ function genLevel(level, seed) {
       floats.push({ x: cx - 16, y: ctop, w: 32 });   // perch at the top
     }
   }
-  // Hazards (L2+): a scaling mix of the 12 kinds placed along the ground runs.
-  const hazards = [];
+  // Hazards (L2+): a scaling mix placed along the ground runs (gauntlets add their own too).
   const nHaz = level >= 2 ? level * 2 - 1 : 0;
   for (let i = 0; i < nHaz; i++) {
     const g = mid[Math.floor(rand() * mid.length)];
