@@ -51,23 +51,28 @@ test('enraged revive charges ~1.5x faster', async ({ page }) => {
   expect(fast).toBeGreaterThan(base * 1.35);
 });
 
-test('the boss scream freezes the hero (~5s), which prevents movement; then releases', async ({ page }) => {
-  const r = await page.evaluate(() => {
+test('scream: 1.5s shake warning, then freezes a nearby hero (~1.5s) but not one ½-screen away', async ({ page }) => {
+  const run = (dist) => page.evaluate((dist) => {
     window.BS.start(); window.BS.reseed(1); window.BS.setLevel(5); window.BS.setMode('normal');
-    const st = window.BS.state(); st.hero.ghost = 0; window.BS.activateBoss();
-    const b = window.BS.boss(), h = window.BS.hero();
-    // force a scream (hero not ghostly, so the freeze lands)
-    b.state = 'idle'; b.x = b.startX; b.stateT = 0; b.screamT = 0;
-    window.BS.stepFixed(1);
-    const frozen = h.frozen, screaming = b.state === 'scream';
-    // movement block: hold right while frozen (ghost now, so the boss can't knock us) → no movement
-    h.ghost = 1e9; const x0 = h.x;
-    window.BS.Input.reset(); window.BS.Input.press('right', true); window.BS.stepFixed(30);
-    const moved = Math.abs(h.x - x0);
-    window.BS.Input.reset();
-    return { frozen, screaming, moved };
-  });
-  expect(r.frozen).toBeGreaterThan(4);       // ~5s freeze
-  expect(r.screaming).toBe(true);
-  expect(r.moved).toBeLessThan(1);           // input ignored while frozen
+    window.BS.activateBoss();
+    const b = window.BS.boss(), h = window.BS.hero(), C = window.BS.CONFIG;
+    b.canScream = true; b.state = 'shriek'; b.stateT = 1.5;
+    const pin = () => { h.x = b.x - dist; h.y = C.PLAT_Y; h.vx = 0; h.vy = 0; h.dead = false; h.ghost = 0; };   // keep the hero put & mortal
+    let warnState = null, warnFrozen = null;
+    for (let k = 0; k < 400; k++) { pin(); window.BS.stepFixed(1); if (k === 9) { warnState = b.state; warnFrozen = h.frozen; } if (b.state === 'scream') break; }
+    const screaming = b.state === 'scream', frozen = h.frozen;
+    // while frozen, movement is blocked (stop pinning x; ghost so the boss can't knock us)
+    h.ghost = 1e9; const x0 = h.x; window.BS.Input.reset(); window.BS.Input.press('right', true);
+    for (let k = 0; k < 20; k++) { h.y = C.PLAT_Y; h.vy = 0; window.BS.stepFixed(1); }
+    const moved = Math.abs(h.x - x0); window.BS.Input.reset();
+    return { warnState, warnFrozen, screaming, frozen, moved };
+  }, dist);
+  const near = await run(60), far = await run(300);
+  expect(near.warnState).toBe('shriek');            // still winding up (warning) after 10 frames
+  expect(near.warnFrozen).toBe(0);                  // no freeze during the warning
+  expect(near.screaming).toBe(true);
+  expect(near.frozen).toBeGreaterThan(1);           // ~1.5s stun when close
+  expect(near.frozen).toBeLessThanOrEqual(1.6);
+  expect(near.moved).toBeLessThan(1);               // input ignored while frozen
+  expect(far.frozen).toBe(0);                       // ½-screen away → avoided (neg. control)
 });
