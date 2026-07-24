@@ -24,8 +24,14 @@ test('merchant appears after the boss and opens the shop', async ({ page }) => {
   expect(await page.evaluate(() => window.BS.scene())).toBe('SHOP');
   expect(await page.evaluate(() => !!window.BS.merchant())).toBe(true);
   await expect(page.locator('#shop')).toBeVisible();
-  const expected = await page.evaluate(() => window.BS.SHOP_ITEMS.length + window.BS.COSTUMES.filter((c) => c.price < 900).length);   // Bandana (earned) isn't sold
-  await expect(page.locator('#shop-grid .shop-item')).toHaveCount(expected);   // skills/hearts + costumes
+  // three tabs; the grid shows one tab at a time (starts on SKILLS)
+  await expect(page.locator('#shop-tabs .shop-tab')).toHaveCount(3);
+  const skills = await page.evaluate(() => window.BS.SHOP_ITEMS.filter((i) => i.tab === 'skills').length);
+  await expect(page.locator('#shop-grid .shop-item')).toHaveCount(skills);
+  // switch to COSTUMES → shows every sold costume
+  await page.locator('#shop-tabs .shop-tab').nth(2).click();
+  const costumes = await page.evaluate(() => window.BS.COSTUMES.filter((c) => c.price < 900).length);
+  await expect(page.locator('#shop-grid .shop-item')).toHaveCount(costumes);
 });
 
 test('buying deducts points, marks owned, greys out, and persists', async ({ page }) => {
@@ -76,4 +82,25 @@ test('leaving the shop sends the merchant away and advances to the next level', 
   expect(r.merchant).toBeNull();       // merchant departed
   expect(r.level).toBe(2);
   expect(r.scene).toBe('INTRO');
+});
+
+test('healing tab: Full Heal refills, Regen Potion ticks +¼ heart/5s next level', async ({ page }) => {
+  await openGame(page); await enterPlayPanel(page, 0);
+  await toShop(page, 300);
+  // Full Heal instantly refills current hearts
+  const heal = await page.evaluate(() => {
+    const st = window.BS.state(); st.heartsBought = 4; st.hp = 1;
+    window.BS.buyItem('fullHeal');
+    return { hp: st.hp, max: window.BS.CONFIG.LIVES_START + st.heartsBought + (st.levelHearts | 0) };
+  });
+  expect(heal.hp).toBe(heal.max);      // topped right up
+  // Regen ticks during PLAY (safe flat arena; hero pinned + invincible so only regen moves hp)
+  const regen = await page.evaluate(() => {
+    window.BS.state().points = 999; window.BS.buyItem('regen');
+    window.BS.start(); window.BS.setupArena(1);
+    const st = window.BS.state(), C = window.BS.CONFIG, h = window.BS.hero(); st.hp = 2; st.regen = true; st.regenT = 0;
+    for (let k = 0; k < 6 * 120; k++) { Object.assign(h, { x: 200, y: C.PLAT_Y, vx: 0, vy: 0, onGround: true, ghost: 1e9, dead: false }); window.BS.stepFixed(1); }
+    return st.hp;
+  });
+  expect(regen).toBeCloseTo(2.25, 5);    // exactly one +¼ tick at 5s
 });
