@@ -299,11 +299,11 @@ const LAST_LEVEL = 5;
 // chunks = number of hole+ground segments (levels are ~half their old length).
 // enemies = ~1.3x the old counts (denser — lots on screen at once).
 const TRAVERSE = {
-  1: { chunks: 14, enemies: 27,  chests: 2 },
-  2: { chunks: 11, enemies: 46,  chests: 2 },   // L2 = sky-climb finale into a boss void
-  3: { chunks: 15, enemies: 64,  chests: 3 },
-  4: { chunks: 20, enemies: 62,  chests: 3 },   // trimmed — they spread out now (no overlap)
-  5: { chunks: 23, enemies: 82,  chests: 4 },
+  1: { chunks: 14, enemies: 19,  chests: 2 },   // enemy counts cut ~30% across the board
+  2: { chunks: 11, enemies: 32,  chests: 2 },   // L2 = sky-climb finale into a boss void
+  3: { chunks: 15, enemies: 45,  chests: 3 },
+  4: { chunks: 20, enemies: 43,  chests: 3 },
+  5: { chunks: 23, enemies: 57,  chests: 4 },
 };
 // Treasure-chest loot: stomp a chest to pop a mushroom. ~25% of chests are "bad".
 const GOOD_SHROOMS = ['highjump', 'teleport', 'heal', 'heal', 'money'];   // heal weighted a bit higher
@@ -317,6 +317,10 @@ const ARENA = {
   5: { holes: 3, boxes: 2, boxSpeed: 1.3 },
 };
 const ENEMY = { r: 7, speedMul: { clear: 1, red: 1.7, yellow: 1, blue: 2.4 }, bounce: 300, jumpImpulse: 205, gravity: 900, leapV: 250, leapVX: 118 };
+// How many stomps each type takes to kill. After the FIRST hit, red/yellow/blue turn
+// bloodshot: +20% speed and they hunt the hero (like blue donuts). clear dies in one.
+const ENEMY_HITS = { clear: 1, red: 2, yellow: 2, blue: 3 };
+const ENRAGE_SPEEDUP = 1.2, ENEMY_HIT_IFRAME = 0.5;
 const BOSS = {
   r: 17, hits: 3, iframe: 0.9, returnSpeed: 95, jumpImpulse: 250,
   freeze: 1.5, screamWarn: 1.5, screamDur: 2.0, screamRadius: 240,   // shorter stun; 1.5s shake warning; avoidable past ½ screen
@@ -1830,6 +1834,7 @@ function spawnEnemy(type, side, speedMul) {
     vx: dir * baseSpeed, vy: 0, r: ENEMY.r, type, side, dir, baseSpeed,
     onGround: false, leaping: false, alive: true, trail: [], trailT: 0,
     jumpT: 0.5 + Game.rand() * 0.7, spikes: Game.rand() < 0.5 ? 3 : 5, gaze: -1,
+    hits: ENEMY_HITS[type] || 1, bloodshot: false, hitT: 0,
   });
   Audio.sfx('spawn');
 }
@@ -1850,6 +1855,7 @@ function spawnPlaced(p) {
     x: p.x, y: top, vx: dir * baseSpeed, vy: 0, r: ENEMY.r, type: p.type, side: 'placed', dir, baseSpeed,
     onGround: true, leaping: false, alive: true, trail: [], trailT: 0, patrol: !homing, homing,
     jumpT: 0.5 + Game.rand() * 0.7, spikes: Game.rand() < 0.5 ? 3 : 5, gaze: -1,
+    hits: ENEMY_HITS[p.type] || 1, bloodshot: false, hitT: 0,
   });
 }
 
@@ -1864,6 +1870,7 @@ function spawnSwarm(n) {
       x, y: top, vx: -dir * bs, vy: 0, r: ENEMY.r, type, side: 'swarm', dir: -dir, baseSpeed: bs,
       onGround: true, leaping: false, alive: true, trail: [], trailT: 0, patrol: true,
       jumpT: 0.4 + Game.rand() * 0.6, spikes: Game.rand() < 0.5 ? 3 : 5, gaze: -1,
+      hits: ENEMY_HITS[type] || 1, bloodshot: false, hitT: 0,
     });
   }
 }
@@ -1995,6 +2002,26 @@ function updateHazards() {
   }
 }
 
+// A stomp landed on `e`. Decrement its hits; kill+score at zero, otherwise it turns
+// bloodshot: +20% speed and it starts hunting the hero (like a blue donut).
+function hitEnemy(e) {
+  e.hits = (e.hits || 1) - 1;
+  e.hitT = ENEMY_HIT_IFRAME;
+  if (e.hits <= 0) {
+    e.alive = false;
+    addKill(e.x, e.y - e.r, ENEMY_COL[e.type] || '#fff', e.type === 'blue' ? 3 : 1);
+    shake(3);
+    return;
+  }
+  if (!e.bloodshot) {                                // first blood → enrage
+    e.bloodshot = true;
+    e.baseSpeed *= ENRAGE_SPEEDUP;
+    e.homing = true; e.patrol = false;               // now hunts the hero
+  }
+  e.dir = e.x < Game.hero.x ? 1 : -1; e.vx = e.dir * e.baseSpeed;
+  spawnBurst(e.x, e.y - e.r, ENEMY_COL[e.type] || '#fff', 6);
+  Audio.sfx('bossHit'); shake(2);
+}
 function updateEnemies(dt) {
   const C = CONFIG, ter = Game.terrain, L = LEVELS[Game.level] || LEVELS[1], h = Game.hero;
 
@@ -2019,6 +2046,7 @@ function updateEnemies(dt) {
 
   for (const e of Game.enemies) {
     if (!e.alive) continue;
+    if (e.hitT > 0) e.hitT -= dt;                    // brief i-frame between stomps (one hit per stomp)
     // motion-trace samples
     e.trailT -= dt;
     if (e.trailT <= 0) { e.trail.push({ x: e.x, y: e.y }); if (e.trail.length > 6) e.trail.shift(); e.trailT = 0.05; }
@@ -2064,7 +2092,7 @@ function updateEnemies(dt) {
       // Generous stomp: descending onto the enemy's upper ~70%, with extra horizontal reach.
       const SM = 5;
       const stomp = h.vy > 0 && hbot > etop && h.y < e.y - e.r * 0.3 && hr > el - SM && hl < er + SM;
-      if (stomp) { e.alive = false; h.vy = -ENEMY.bounce; h.onGround = false; h.jumping = true; addKill(e.x, e.y - e.r, ENEMY_COL[e.type] || '#fff', e.type === 'blue' ? 3 : 1); shake(3); }
+      if (stomp) { h.vy = -ENEMY.bounce; h.onGround = false; h.jumping = true; if (e.hitT <= 0) hitEnemy(e); }   // bounce off; one hit per stomp
       else if (hr > el && hl < er && hbot > etop && htop < ebot) {   // side contact
         if (h.shieldT > 0) { e.alive = false; h.shieldT = 0; addKill(e.x, e.y - e.r, '#c9d0da', e.type === 'blue' ? 3 : 1); shake(4); }  // spiked shield kills the attacker
         else heroHurt(e.x > h.x);                     // hit → knock away from the enemy
@@ -2943,7 +2971,7 @@ function drawHero() {
 
 const ENEMY_COL = { clear: '#dfe6e9', red: '#e0392f', yellow: '#f4d03f', rainbow: '#fff', volcano: '#c1121f', blue: '#2a7fd0' };
 
-function drawDonut(cx, cy, r, type, spikes, gaze, alpha, phase) {
+function drawDonut(cx, cy, r, type, spikes, gaze, alpha, phase, blood) {
   const col = ENEMY_COL[type] || '#fff';
   ctx.globalAlpha = alpha;
   // spikes (triangles pointing outward)
@@ -2958,9 +2986,13 @@ function drawDonut(cx, cy, r, type, spikes, gaze, alpha, phase) {
   // donut ring
   if (type === 'clear') { ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke(); }
   else { ctx.fillStyle = col; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill(); }
-  // eye socket + tracking pupil
-  ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(cx, cy, r * 0.55, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(cx + gaze * r * 0.22, cy, r * 0.3, 0, Math.PI * 2); ctx.fill();
+  // eye socket + tracking pupil (bloodshot & angry once enraged)
+  ctx.fillStyle = blood ? '#ffd9d4' : '#fff'; ctx.beginPath(); ctx.arc(cx, cy, r * 0.55, 0, Math.PI * 2); ctx.fill();
+  if (blood) {                                          // red veins radiating across the sclera
+    ctx.strokeStyle = 'rgba(210,20,10,0.85)'; ctx.lineWidth = 0.7;
+    for (let i = 0; i < 4; i++) { const a = phase * 0.3 + i * 1.9; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(a) * r * 0.52, cy + Math.sin(a) * r * 0.52); ctx.stroke(); }
+  }
+  ctx.fillStyle = blood ? '#5a0000' : '#111'; ctx.beginPath(); ctx.arc(cx + gaze * r * 0.22, cy, r * (blood ? 0.34 : 0.3), 0, Math.PI * 2); ctx.fill();
   ctx.globalAlpha = 1;
 }
 
@@ -2970,9 +3002,9 @@ function drawEnemies() {
     // fading motion trail
     for (let i = 0; i < e.trail.length; i++) {
       const tp = e.trail[i], a = 0.06 + 0.12 * (i / e.trail.length);
-      drawDonut(tp.x, tp.y - e.r, e.r * 0.85, e.type, e.spikes, e.gaze, a, phase);
+      drawDonut(tp.x, tp.y - e.r, e.r * 0.85, e.type, e.spikes, e.gaze, a, phase, e.bloodshot);
     }
-    drawDonut(e.x, e.y - e.r, e.r, e.type, e.spikes, e.gaze, 1, phase);
+    drawDonut(e.x, e.y - e.r, e.r, e.type, e.spikes, e.gaze, 1, phase, e.bloodshot);
   }
 }
 
@@ -3452,7 +3484,7 @@ window.BS = {
   hero: () => Game.hero,
   heroHurt, respawnHero,
   enemies: () => Game.enemies,
-  spawnEnemy,
+  spawnEnemy, hitEnemy, ENEMY_HITS,
   chests: () => (Game.levelData ? Game.levelData.chests : []),
   pickups: () => Game.pickups,
   applyMushroom, openChest,

@@ -103,15 +103,20 @@ test('blue donuts: rare on L3-5 only, home toward the hero, worth 3 points', asy
     window.BS.spawnEnemy('blue'); const e = window.BS.enemies()[0]; e.homing = true; e.patrol = false; Object.assign(e, { x: 120, y: C.PLAT_Y, onGround: true });
     const x0 = e.x; for (let k = 0; k < 90; k++) window.BS.stepFixed(1);
     const moved = window.BS.enemies()[0].x - x0;
-    st.points = 0; const b = window.BS.enemies()[0]; Object.assign(h, { x: b.x, y: b.y - b.r - 3, vy: 60, onGround: false, ghost: 0 }); window.BS.stepFixed(3);
-    return { l1: blues(1), l2: blues(2), l3: blues(3), l45: blues(4) + blues(5), moved: Math.round(moved), pts: st.points };
+    st.points = 0; const b = window.BS.enemies()[0]; b.hits = window.BS.ENEMY_HITS.blue; b.bloodshot = false; Object.assign(h, { onGround: true });
+    window.BS.hitEnemy(b); const afterOne = { hits: b.hits, blood: b.bloodshot, alive: b.alive };   // 1st of 3 → bloodshot, still alive
+    window.BS.hitEnemy(b); window.BS.hitEnemy(b);                                                    // 3 hits total → dead + score
+    return { l1: blues(1), l2: blues(2), l3: blues(3), l45: blues(4) + blues(5), moved: Math.round(moved), pts: st.points, afterOne };
   });
   expect(r.l1).toBe(0);              // never on levels 1-2
   expect(r.l2).toBe(0);
   expect(r.l3).toBeGreaterThan(0);   // present (rarely) on 3-5
   expect(r.l45).toBeGreaterThan(0);
   expect(r.moved).toBeGreaterThan(20);   // homed toward the hero (was to its right)
-  expect(r.pts).toBe(3);                 // worth 3 points
+  expect(r.afterOne.alive).toBe(true);   // takes 3 hits — survives the first
+  expect(r.afterOne.hits).toBe(2);
+  expect(r.afterOne.blood).toBe(true);   // …and goes bloodshot after one hit
+  expect(r.pts).toBe(3);                 // worth 3 points on the final (3rd) hit
 });
 
 test('stomping is forgiving: descending onto the upper portion / a bit off-centre still kills', async ({ page }) => {
@@ -161,6 +166,41 @@ test('enemies push apart instead of overlapping', async ({ page }) => {
   });
   expect(r.before).toBeLessThan(2 * r.r);        // started overlapping
   expect(r.after).toBeGreaterThanOrEqual(2 * r.r - 1);   // pushed apart to (roughly) non-overlap
+});
+
+test('red/yellow take 2 hits & enrage bloodshot; blue takes 3; clear dies in one (neg. control)', async ({ page }) => {
+  await openGame(page);
+  await page.evaluate(() => window.BS.freeze(true));
+  const probe = (type) => page.evaluate((type) => {
+    window.BS.start(); window.BS.reseed(1); window.BS.setupArena(1);
+    const st = window.BS.state(); st.enemies.length = 0; st.points = 0;
+    const C = window.BS.CONFIG; window.BS.spawnEnemy(type);
+    const e = window.BS.enemies()[0]; Object.assign(e, { x: 240, y: C.PLAT_Y, onGround: true, patrol: true, homing: false });
+    const base = e.baseSpeed, maxHits = e.hits;
+    window.BS.hitEnemy(e);                                     // first hit
+    const afterOne = { alive: e.alive, hits: e.hits, blood: e.bloodshot, homing: e.homing, spedUp: +(e.baseSpeed / base).toFixed(2) };
+    let guard = 0; while (e.alive && guard++ < 9) window.BS.hitEnemy(e);   // finish it off
+    return { maxHits, afterOne, dead: !e.alive };
+  }, type);
+  const red = await probe('red');
+  expect(red.maxHits).toBe(2);
+  expect(red.afterOne.alive).toBe(true);      // survives the first hit
+  expect(red.afterOne.blood).toBe(true);      // …turns bloodshot
+  expect(red.afterOne.homing).toBe(true);     // …and hunts the hero
+  expect(red.afterOne.spedUp).toBe(1.2);      // …at +20% speed
+  expect(red.dead).toBe(true);                // dies on the second hit
+  const yellow = await probe('yellow');
+  expect(yellow.maxHits).toBe(2);
+  expect(yellow.afterOne.blood).toBe(true);
+  expect(yellow.afterOne.homing).toBe(true);
+  const blue = await probe('blue');
+  expect(blue.maxHits).toBe(3);               // blue needs three
+  expect(blue.afterOne.blood).toBe(true);     // bloodshot after one
+  // neg. control: clear donuts still die in a single hit and never enrage
+  const clear = await probe('clear');
+  expect(clear.maxHits).toBe(1);
+  expect(clear.afterOne.alive).toBe(false);
+  expect(clear.afterOne.blood).toBe(false);
 });
 
 test('low-HP red vignette renders at ≤1 heart without errors', async ({ page }) => {
