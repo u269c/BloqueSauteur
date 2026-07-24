@@ -306,7 +306,7 @@ const TRAVERSE = {
   5: { chunks: 23, enemies: 82,  chests: 4 },
 };
 // Treasure-chest loot: stomp a chest to pop a mushroom. ~25% of chests are "bad".
-const GOOD_SHROOMS = ['highjump', 'teleport', 'heal', 'money'];
+const GOOD_SHROOMS = ['highjump', 'teleport', 'heal', 'heal', 'money'];   // heal weighted a bit higher
 const BAD_SHROOMS = ['poison', 'swarm'];
 // Boss arena (the single-screen duel at the level's end): exact holes + spawn boxes.
 const ARENA = {
@@ -3100,9 +3100,18 @@ function render() {
   else if (Game.scene === 'VICTORY') centerText([{ t: 'VICTORY!', big: true, color: '#f4d03f' }, { t: 'you conquered the tower', color: '#eee8d5' }, { t: MODES[Game.mode].name, color: '#93a1a1' }, { t: 'tap to return to title', color: '#93a1a1' }]);
 
   ctx.restore();
+  if (Game.scene === 'PLAY' && Game.hp > 0 && Game.hp <= 1) drawLowHpVignette();   // ≤1 heart: danger
   if (Game.hero.dizzy > 0) applyWave();   // poison mushroom: ripple the whole composited frame
   if (Game.transition) applySpiral();      // spiral into/out of the pickleball match
   updateShieldButton();
+}
+// Pulsing red edge vignette shown when the hero is down to their last heart.
+function drawLowHpVignette() {
+  const W = CONFIG.W, H = CONFIG.H, pulse = 0.5 + 0.5 * Math.sin(Game.t * 5);
+  const g = ctx.createRadialGradient(W / 2, H / 2, H * 0.32, W / 2, H / 2, H * 0.78);
+  g.addColorStop(0, 'rgba(190,0,0,0)');
+  g.addColorStop(1, `rgba(170,0,0,${0.32 + 0.28 * pulse})`);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
 }
 // Post-process ripple for the poison-mushroom wobble: snapshot the frame, then re-blit it
 // in thin horizontal strips shifted by a travelling sine wave.

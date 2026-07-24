@@ -96,3 +96,13 @@ test('poison mushroom: dizzy wobble for ~2s, then a fall costs a heart', async (
   expect(r.wobbleObserved).toBe(true);
   expect(r.hp).toBeLessThan(5);         // after the wobble the hero fell → lost a heart
 });
+
+test('heal is the most common good mushroom (weighted up)', async ({ page }) => {
+  const c = await page.evaluate(() => {
+    const counts = {};
+    for (let s = 0; s < 400; s++) for (const ch of window.BS.genLevel(4, s).chests) counts[ch.type] = (counts[ch.type] || 0) + 1;
+    return counts;
+  });
+  expect(c.heal).toBeGreaterThan(c.money);      // heal weighted higher than the other good shrooms
+  expect(c.heal).toBeGreaterThan(c.highjump);
+});
