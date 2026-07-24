@@ -301,7 +301,7 @@ const ARENA = {
   4: { holes: 3, boxes: 1, boxSpeed: 1.3 },
   5: { holes: 3, boxes: 2, boxSpeed: 1.3 },
 };
-const ENEMY = { r: 7, speedMul: { clear: 1, red: 1.7, yellow: 1 }, bounce: 300, jumpImpulse: 205, gravity: 900, leapV: 250, leapVX: 118 };
+const ENEMY = { r: 7, speedMul: { clear: 1, red: 1.7, yellow: 1, blue: 2.4 }, bounce: 300, jumpImpulse: 205, gravity: 900, leapV: 250, leapVX: 118 };
 const BOSS = {
   r: 17, hits: 3, iframe: 0.9, returnSpeed: 95, jumpImpulse: 250,
   freeze: 1.5, screamWarn: 1.5, screamDur: 2.0, screamRadius: 240,   // shorter stun; 1.5s shake warning; avoidable past ½ screen
@@ -674,6 +674,9 @@ function genLevel(level, seed) {
     const g = mid[i % mid.length], span = Math.max(1, (g.x1 - g.x0) - 12);
     enemies.push({ x: Math.round(g.x0 + 6 + rand() * span), type: roster[Math.floor(rand() * roster.length)] });
   }
+  // Blue donuts: rare homing chasers, only levels 3-5 (0-2, sometimes none).
+  const blues = level >= 3 ? Math.floor(rand() * 3) : 0;
+  for (let i = 0; i < blues; i++) { const g = mid[Math.floor(rand() * mid.length)]; enemies.push({ x: Math.round(g.x0 + 6 + rand() * Math.max(1, (g.x1 - g.x0) - 12)), type: 'blue' }); }
   for (let i = 0; i < (p.chests || 0); i++) {
     const g = mid[Math.floor((i + 0.5) * mid.length / (p.chests || 1)) % mid.length];
     const bad = rand() < 0.25;
@@ -1445,14 +1448,14 @@ function addFloater(x, y, text, color) {
 }
 // Award a monster kill. Airborne kills build a combo: the k-th airborne kill in a
 // chain awards 2*min(k,10)-1 points (a chain of N totals N², capped at the 10x tier).
-function addKill(x, y, color) {
+function addKill(x, y, color, basePts) {
   // No point-farming during the boss duel: spawn-box minions score nothing there.
   if (Game.bossActive) { Audio.sfx('stomp'); spawnBurst(x, y, color, 12); return; }
-  let award = 1;
+  let award = basePts || 1;                       // blue donuts are worth 3
   if (!Game.hero.onGround) {
     Game.combo += 1;
     const m = Math.min(Game.combo, 10);
-    award = 2 * m - 1;
+    award = (2 * m - 1) * (basePts || 1);         // combos multiply the base value
     if (Game.combo >= 2) { addFloater(x, y - 8, 'x' + m + '  +' + award, '#f4d03f'); Audio.sfx('lifeUp'); }
     else addFloater(x, y - 8, '+' + award, '#eee8d5');
   } else addFloater(x, y - 8, '+' + award, '#eee8d5');
@@ -1580,10 +1583,11 @@ function arenaBoxes() {
 function spawnPlaced(p) {
   const L = LEVELS[Game.level] || LEVELS[1], top = groundTopAt(Game.levelData, p.x);
   if (top == null) return;
+  const homing = p.type === 'blue';   // blue donuts chase the hero (fast, hoppy) — never patrol
   const dir = Game.hero.x < p.x ? -1 : 1, baseSpeed = L.speed * (ENEMY.speedMul[p.type] || 1);
   Game.enemies.push({
     x: p.x, y: top, vx: dir * baseSpeed, vy: 0, r: ENEMY.r, type: p.type, side: 'placed', dir, baseSpeed,
-    onGround: true, leaping: false, alive: true, trail: [], trailT: 0, patrol: true,
+    onGround: true, leaping: false, alive: true, trail: [], trailT: 0, patrol: !homing, homing,
     jumpT: 0.5 + Game.rand() * 0.7, spikes: Game.rand() < 0.5 ? 3 : 5, gaze: -1,
   });
 }
@@ -1681,6 +1685,9 @@ function updateEnemies(dt) {
     e.trailT -= dt;
     if (e.trailT <= 0) { e.trail.push({ x: e.x, y: e.y }); if (e.trail.length > 6) e.trail.shift(); e.trailT = 0.05; }
 
+    // homing (blue donut): steer toward the hero along the ground, chasing fast
+    if (e.homing && e.onGround && !e.leaping) { e.dir = h.x < e.x ? -1 : 1; e.vx = e.dir * e.baseSpeed; }
+
     // physics: constant march (vx), gravity, surface follow
     e.vy += ENEMY.gravity * dt;
     e.x += e.vx * dt;
@@ -1699,7 +1706,7 @@ function updateEnemies(dt) {
       } else if (Game.level > 1 && holeAhead && canLand) {
         e.vy = -ENEMY.leapV; e.vx = e.dir * ENEMY.leapVX; e.onGround = false; e.leaping = true;
       }
-      if (e.type === 'yellow') {   // yellow hops on a timer — whether patrolling or marching
+      if (e.type === 'yellow' || e.homing) {   // yellow + blue hop on a timer
         e.jumpT -= dt; if (e.jumpT <= 0) { e.vy = -ENEMY.jumpImpulse; e.onGround = false; e.jumpT = 0.9 + Game.rand() * 0.6; }
       }
     } else e.onGround = false;
@@ -1718,8 +1725,8 @@ function updateEnemies(dt) {
       const hl = h.x - h.w / 2, hr = h.x + h.w / 2, htop = h.y - h.h, hbot = h.y;
       if (hr > el && hl < er && hbot > etop && htop < ebot) {
         const stomp = h.vy > 0 && h.y < e.y - e.r;   // falling onto its top half
-        if (stomp) { e.alive = false; h.vy = -ENEMY.bounce; h.onGround = false; h.jumping = true; addKill(e.x, e.y - e.r, ENEMY_COL[e.type] || '#fff'); shake(3); }   // holding jump → full-height rebound (chain stomps)
-        else if (h.shieldT > 0) { e.alive = false; h.shieldT = 0; addKill(e.x, e.y - e.r, '#c9d0da'); shake(4); }  // spiked shield kills the attacker
+        if (stomp) { e.alive = false; h.vy = -ENEMY.bounce; h.onGround = false; h.jumping = true; addKill(e.x, e.y - e.r, ENEMY_COL[e.type] || '#fff', e.type === 'blue' ? 3 : 1); shake(3); }   // holding jump → full-height rebound (chain stomps)
+        else if (h.shieldT > 0) { e.alive = false; h.shieldT = 0; addKill(e.x, e.y - e.r, '#c9d0da', e.type === 'blue' ? 3 : 1); shake(4); }  // spiked shield kills the attacker
         else heroHurt(e.x > h.x);                     // hit → knock away from the enemy
       }
     }
@@ -1764,7 +1771,7 @@ function strongHitBlast() {
   spawnBurst(h.x, h.y - 2, '#ffca6b', 22); shake(6);
   for (const e of Game.enemies) {
     if (e.alive && Math.abs(e.x - h.x) <= R + e.r && Math.abs((e.y) - h.y) <= 24) {
-      e.alive = false; addKill(e.x, e.y - e.r, ENEMY_COL[e.type] || '#fff');
+      e.alive = false; addKill(e.x, e.y - e.r, ENEMY_COL[e.type] || '#fff', e.type === 'blue' ? 3 : 1);
     }
   }
   const b = Game.boss;
@@ -2405,7 +2412,7 @@ function drawHero() {
   ctx.globalAlpha = 1;
 }
 
-const ENEMY_COL = { clear: '#dfe6e9', red: '#e0392f', yellow: '#f4d03f', rainbow: '#fff', volcano: '#c1121f' };
+const ENEMY_COL = { clear: '#dfe6e9', red: '#e0392f', yellow: '#f4d03f', rainbow: '#fff', volcano: '#c1121f', blue: '#2a7fd0' };
 
 function drawDonut(cx, cy, r, type, spikes, gaze, alpha, phase) {
   const col = ENEMY_COL[type] || '#fff';
