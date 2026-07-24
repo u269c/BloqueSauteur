@@ -1851,10 +1851,12 @@ function updateEnemies(dt) {
     if (e.alive && h.ghost <= 0 && h.dodgeT <= 0 && !h.dead) {
       const el = e.x - e.r, er = e.x + e.r, etop = e.y - 2 * e.r, ebot = e.y;
       const hl = h.x - h.w / 2, hr = h.x + h.w / 2, htop = h.y - h.h, hbot = h.y;
-      if (hr > el && hl < er && hbot > etop && htop < ebot) {
-        const stomp = h.vy > 0 && h.y < e.y - e.r;   // falling onto its top half
-        if (stomp) { e.alive = false; h.vy = -ENEMY.bounce; h.onGround = false; h.jumping = true; addKill(e.x, e.y - e.r, ENEMY_COL[e.type] || '#fff', e.type === 'blue' ? 3 : 1); shake(3); }   // holding jump → full-height rebound (chain stomps)
-        else if (h.shieldT > 0) { e.alive = false; h.shieldT = 0; addKill(e.x, e.y - e.r, '#c9d0da', e.type === 'blue' ? 3 : 1); shake(4); }  // spiked shield kills the attacker
+      // Generous stomp: descending onto the enemy's upper ~70%, with extra horizontal reach.
+      const SM = 5;
+      const stomp = h.vy > 0 && hbot > etop && h.y < e.y - e.r * 0.3 && hr > el - SM && hl < er + SM;
+      if (stomp) { e.alive = false; h.vy = -ENEMY.bounce; h.onGround = false; h.jumping = true; addKill(e.x, e.y - e.r, ENEMY_COL[e.type] || '#fff', e.type === 'blue' ? 3 : 1); shake(3); }
+      else if (hr > el && hl < er && hbot > etop && htop < ebot) {   // side contact
+        if (h.shieldT > 0) { e.alive = false; h.shieldT = 0; addKill(e.x, e.y - e.r, '#c9d0da', e.type === 'blue' ? 3 : 1); shake(4); }  // spiked shield kills the attacker
         else heroHurt(e.x > h.x);                     // hit → knock away from the enemy
       }
     }
@@ -1975,10 +1977,11 @@ function updateBoss(dt) {
   if (h.ghost <= 0 && h.dodgeT <= 0 && !h.dead && b.iframe <= 0) {
     const bl = b.x - b.r, br = b.x + b.r, btop = b.y - 2 * b.r, bbot = b.y;
     const hl = h.x - h.w / 2, hr = h.x + h.w / 2, htop = h.y - h.h, hbot = h.y;
-    if (hr > bl && hl < br && hbot > btop && htop < bbot) {
-      const stomp = h.vy > 0 && h.y < b.y - b.r;
-      if (stomp) { bossHit(b, h.strong ? 2 : 1); h.vy = -ENEMY.bounce; h.onGround = false; h.jumping = true; h.strong = false; }   // held jump → full rebound
-      else if (h.shieldT > 0) { h.shieldT = 0; bossHit(b); }   // shield damages the boss instead of hurting you
+    const SM = 5;
+    const stomp = h.vy > 0 && hbot > btop && h.y < b.y - b.r * 0.3 && hr > bl - SM && hl < br + SM;   // generous stomp
+    if (stomp) { bossHit(b, h.strong ? 2 : 1); h.vy = -ENEMY.bounce; h.onGround = false; h.jumping = true; h.strong = false; }   // held jump → full rebound
+    else if (hr > bl && hl < br && hbot > btop && htop < bbot) {   // side contact
+      if (h.shieldT > 0) { h.shieldT = 0; bossHit(b); }   // shield damages the boss instead of hurting you
       else heroHurt(b.x > h.x);
     }
   }

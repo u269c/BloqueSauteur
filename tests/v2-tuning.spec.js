@@ -113,3 +113,33 @@ test('blue donuts: rare on L3-5 only, home toward the hero, worth 3 points', asy
   expect(r.moved).toBeGreaterThan(20);   // homed toward the hero (was to its right)
   expect(r.pts).toBe(3);                 // worth 3 points
 });
+
+test('stomping is forgiving: descending onto the upper portion / a bit off-centre still kills', async ({ page }) => {
+  await openGame(page);
+  await page.evaluate(() => window.BS.freeze(true));
+  const tryStomp = (dy, dx, vy) => page.evaluate(({ dy, dx, vy }) => {
+    window.BS.start(); window.BS.reseed(1); window.BS.setupArena(1); window.BS.setMode('normal');
+    const st = window.BS.state(); st.enemies.length = 0; st.hp = 5;
+    const C = window.BS.CONFIG; window.BS.spawnEnemy('clear');
+    const e = window.BS.enemies()[0]; Object.assign(e, { x: 240, y: C.PLAT_Y, vx: 0, vy: 0, onGround: true });
+    const h = window.BS.hero(); Object.assign(h, { x: 240 + dx, y: e.y - e.r * dy, vx: 0, vy, onGround: false, ghost: 0, hurt: 0, dead: false });
+    window.BS.stepFixed(2);
+    return { alive: window.BS.enemies()[0] ? window.BS.enemies()[0].alive : false, hp: st.hp };
+  }, { dy, dx, vy });
+  const upper = await tryStomp(0.6, 0, 60);   // feet only ~60% up (below the old centre threshold) — descending
+  expect(upper.alive).toBe(false);            // still a stomp now
+  expect(upper.hp).toBe(5);                   // no damage
+  const offset = await tryStomp(1.4, 15, 60); // 15px off-centre, descending onto the top
+  expect(offset.alive).toBe(false);           // wider reach catches it
+  // neg. control: grounded, level with the enemy (not descending) → a side hit, not a stomp
+  const sideways = await page.evaluate(() => {
+    window.BS.start(); window.BS.reseed(1); window.BS.setupArena(1); window.BS.setMode('normal');
+    const st = window.BS.state(); st.enemies.length = 0; st.hp = 5; const C = window.BS.CONFIG;
+    window.BS.spawnEnemy('clear'); const e = window.BS.enemies()[0]; Object.assign(e, { x: 240, y: C.PLAT_Y, vx: 0, vy: 0, onGround: true });
+    const h = window.BS.hero(); Object.assign(h, { x: 252, y: C.PLAT_Y, vx: 0, vy: 0, onGround: true, ghost: 0, hurt: 0, dead: false });
+    window.BS.stepFixed(1);
+    return { alive: window.BS.enemies()[0] ? window.BS.enemies()[0].alive : false, hp: st.hp };
+  });
+  expect(sideways.alive).toBe(true);      // enemy survives a side bump
+  expect(sideways.hp).toBeLessThan(5);    // and the hero takes a hit
+});
