@@ -1567,7 +1567,7 @@ function gotoTitle() {
 // ══════════════════════════════════════════════════════════════════
 //  THE CHALLENGER — pickleball minigame (L4), with a spiral transition
 // ══════════════════════════════════════════════════════════════════
-const PB = { courtY: 205, netX: 240, netTop: 150, g: 780, hMin: 40, hMax: 224, aMin: 256, aMax: 440, target: 5, cap: 7 };
+const PB = { courtY: 205, netX: 240, netTop: 178, g: 780, hMin: 40, hMax: 224, aMin: 256, aMax: 440, target: 5, cap: 7 };   // net ~half height so serves clear it
 
 // Spiral screen transition: swirl the frame into the centre, swap at the midpoint, swirl back.
 function beginTransition(cb) { Game.transition = { t: 0, dur: 1.1, swapped: false, cb }; }
@@ -1589,9 +1589,11 @@ function setupPickle() {
 }
 function pickleServe(p) {
   const fromHero = p.server === 'hero';
-  Object.assign(p.ball, { x: fromHero ? 140 : 340, y: PB.courtY - 44, vx: (fromHero ? 1 : -1) * 150, vy: -270, r: 5, live: true, floor: 0, last: p.server });
-  p.aiMiss = Math.random() < 0.28;          // will the AI whiff this rally?
+  const sx = fromHero ? Math.min(PB.netX - 14, p.hero.x + 6) : 340;
+  Object.assign(p.ball, { x: sx, y: PB.courtY - 44, vx: (fromHero ? 165 : -150), vy: fromHero ? -300 : -270, r: 5, live: true, floor: 0, last: p.server, aiJudged: false });
+  p.rallyLen = 0;                           // AI whiffs more often the longer the rally runs
   p.state = 'rally';
+  if (fromHero) { p.hitAnim = 0.2; Audio.sfx('stomp'); }
 }
 function pickleAward(p, side) {   // `side` = who WON the point
   if (side === 'hero') p.scoreH++; else p.scoreA++;
@@ -1623,14 +1625,32 @@ function updatePickle(dt) {
   const p = Game.pickle; if (!p) return;
   p.stateT -= dt; if (p.hitAnim > 0) p.hitAnim -= dt; if (p.aiHitAnim > 0) p.aiHitAnim -= dt;
   const hero = p.hero, ball = p.ball;
-  // hero movement (left half) + jump
+  // hero movement (left half)
   const dir = (Input.right ? 1 : 0) - (Input.left ? 1 : 0);
   hero.x = Math.max(PB.hMin, Math.min(PB.hMax, hero.x + dir * 150 * dt));
-  if (Input.consumeJump() && hero.onGround) { hero.vy = -300; hero.onGround = false; Audio.sfx('jump'); }
+  const jump = Input.consumeJump();
+
+  // Waiting to serve: the ball is tossed above the hero's paddle — press JUMP to strike it.
+  if (p.state === 'toss') {
+    ball.live = true; ball.r = 5; ball.vx = 0; ball.vy = 0; ball.floor = 0; ball.last = 'hero';
+    ball.x = Math.min(PB.netX - 14, hero.x + 6);
+    ball.y = PB.courtY - 34 + Math.sin(Game.t * 6) * 3;      // gentle bob over the paddle
+    hero.vy += PB.g * dt; hero.y += hero.vy * dt;
+    if (hero.y >= PB.courtY) { hero.y = PB.courtY; hero.vy = 0; hero.onGround = true; }
+    if (jump) pickleServe(p);                                 // strike the serve
+    return;
+  }
+  if (jump && hero.onGround) { hero.vy = -300; hero.onGround = false; Audio.sfx('jump'); }   // rally jump/smash
   hero.vy += PB.g * dt; hero.y += hero.vy * dt;
   if (hero.y >= PB.courtY) { hero.y = PB.courtY; hero.vy = 0; hero.onGround = true; }
 
-  if (p.state === 'serve') { if (p.stateT <= 0) pickleServe(p); return; }
+  if (p.state === 'serve') {
+    if (p.stateT <= 0) {
+      if (p.server === 'hero') { p.state = 'toss'; p.msg = 'JUMP TO SERVE!'; }   // player strikes the serve
+      else pickleServe(p);                                                        // opponent serves automatically
+    }
+    return;
+  }
   if (p.state === 'point') { if (p.stateT <= 0) { p.state = 'serve'; p.stateT = 0.7; p.msg = ''; } return; }
   if (p.state === 'over') {
     p.overT += dt;
@@ -1654,15 +1674,21 @@ function updatePickle(dt) {
   if (ball.x < PB.netX && Math.abs(ball.x - hero.x) < 15 && ball.y > hero.y - 24 && ball.last !== 'hero') {
     const smash = !hero.onGround;
     ball.vx = smash ? 275 : 150; ball.vy = smash ? -190 : -320; ball.r = smash ? 5 : 8; ball.last = 'hero'; ball.floor = 0;
+    ball.aiJudged = false; p.rallyLen = (p.rallyLen || 0) + 1;
     p.hitAnim = 0.18; Audio.sfx('stomp');
   }
-  // AI: track the ball; return it unless whiffing this rally
+  // AI: track the ball; decide ONCE per incoming shot whether it reaches it. The whiff
+  // chance climbs with the rally length (and is forced past a hard cap) so points always land.
   if (ball.x > PB.netX) {
     p.ai.x += Math.max(-260 * dt, Math.min(260 * dt, ball.x - p.ai.x));
     p.ai.x = Math.max(PB.aMin, Math.min(PB.aMax, p.ai.x));
-    if (!p.aiMiss && Math.abs(ball.x - p.ai.x) < 15 && ball.y > PB.courtY - 30 && ball.last !== 'ai') {
-      ball.vx = -(150 + Math.random() * 60); ball.vy = -300; ball.r = 6; ball.last = 'ai'; ball.floor = 0;
-      p.aiHitAnim = 0.18; Audio.sfx('stomp');
+    if (!ball.aiJudged && Math.abs(ball.x - p.ai.x) < 15 && ball.y > PB.courtY - 30 && ball.last !== 'ai') {
+      ball.aiJudged = true;
+      const rl = p.rallyLen || 0, missProb = rl >= 12 ? 1 : Math.min(0.8, 0.1 + 0.07 * rl);
+      if (Math.random() >= missProb) {          // returns it
+        ball.vx = -(150 + Math.random() * 60); ball.vy = -300; ball.r = 6; ball.last = 'ai'; ball.floor = 0;
+        p.rallyLen = rl + 1; p.aiHitAnim = 0.18; Audio.sfx('stomp');
+      }                                          // else: whiffs — the ball sails past → hero scores
     }
   }
 }
@@ -3378,8 +3404,7 @@ function drawPickle() {
   ctx.fillStyle = '#fff'; ctx.fillRect(PB.netX - 6, PB.netTop - 2, 12, 2);
   // players
   const hcol = heroColor(Game.hero);
-  ctx.fillStyle = '#0a0a0a'; ctx.fillRect(p.hero.x - 6, p.hero.y - 18, 12, 18);
-  ctx.fillStyle = hcol; ctx.fillRect(p.hero.x - 4, p.hero.y - 15, 8, 6);
+  drawCostume(ctx, p.hero.x - 7, p.hero.y - 20, 14, 20, Game.hero.costumeIdx, hcol);   // YOU — with your equipped costume
   ctx.fillStyle = '#1f6f3a'; ctx.fillRect(p.hero.x + (p.hitAnim > 0 ? 6 : 4), p.hero.y - 14 - (p.hitAnim > 0 ? 6 : 0), 4, 8);   // paddle swing
   ctx.fillStyle = '#0a0a0a'; ctx.fillRect(p.ai.x - 6, PB.courtY - 18, 12, 18);
   ctx.fillStyle = '#b3122a'; ctx.fillRect(p.ai.x - 4, PB.courtY - 15, 8, 5);
