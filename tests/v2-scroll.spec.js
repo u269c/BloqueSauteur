@@ -232,3 +232,30 @@ test.describe('v1.7 · climbing (ropes/ladders/vines/chains/poles)', () => {
     expect(r.y).toBe(r.bot);          // stayed on the ground
   });
 });
+
+test.describe('v1.7 · hazards (12 types)', () => {
+  test('there are 12 hazard kinds across levels; none on L1', async ({ page }) => {
+    const r = await page.evaluate(() => {
+      const kinds = new Set(); let l1 = 0;
+      for (let lv = 1; lv <= 5; lv++) for (let s = 0; s < 40; s++) { const hs = window.BS.genLevel(lv, s).hazards || []; if (lv === 1) l1 += hs.length; hs.forEach((h) => kinds.add(h.kind)); }
+      return { count: kinds.size, l1 };
+    });
+    expect(r.count).toBeGreaterThanOrEqual(10);
+    expect(r.count).toBe(12);
+    expect(r.l1).toBe(0);              // L1 stays hazard-free
+  });
+
+  test('a hazard hurts the hero; ghost/dodge passes through (neg. control)', async ({ page }) => {
+    const hp = (ghost) => page.evaluate((ghost) => {
+      window.BS.start(); window.BS.reseed(1); window.BS.setLevel(4); window.BS.setMode('normal');
+      const lvl = window.BS.levelData(), C = window.BS.CONFIG;
+      lvl.hazards = [{ x: 300, top: C.PLAT_Y, kind: 'spikes', ph: 0, range: 20 }];   // always-on
+      const st = window.BS.state(); st.hp = 5; const h = window.BS.hero();
+      Object.assign(h, { x: 300, y: C.PLAT_Y, vx: 0, vy: 0, onGround: true, ghost, hurt: 0, dead: false });
+      window.BS.stepFixed(1);
+      return st.hp;
+    }, ghost);
+    expect(await hp(0)).toBeLessThan(5);        // spikes chipped a heart
+    expect(await hp(1e9)).toBe(5);              // neg. control: ghostly → passes through
+  });
+});

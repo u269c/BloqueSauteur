@@ -713,6 +713,13 @@ function genLevel(level, seed) {
       floats.push({ x: cx - 16, y: ctop, w: 32 });   // perch at the top
     }
   }
+  // Hazards (L2+): a scaling mix of the 12 kinds placed along the ground runs.
+  const hazards = [];
+  const nHaz = level >= 2 ? level * 2 - 1 : 0;
+  for (let i = 0; i < nHaz; i++) {
+    const g = mid[Math.floor(rand() * mid.length)];
+    hazards.push({ x: Math.round(g.x0 + 10 + rand() * Math.max(1, (g.x1 - g.x0) - 20)), top: g.top, kind: HAZARD_KINDS[(level + i) % HAZARD_KINDS.length], ph: rand() * 3, range: 16 + rand() * 18 });
+  }
   // The Challenger: a stationary adventurer on L4, ~1/3 through the level.
   let challenger = null;
   if (level === 4) {
@@ -721,7 +728,7 @@ function genLevel(level, seed) {
     for (const seg of ground) if (Math.abs((seg.x0 + seg.x1) / 2 - targetX) < Math.abs((g.x0 + g.x1) / 2 - targetX)) g = seg;
     challenger = { x: Math.round((g.x0 + g.x1) / 2), top: g.top, done: false };
   }
-  return { level, seed: seed >>> 0, traverse: true, ground, floats, enemies, chests, climbables, bossPit, bossSign, challenger, width: x, exitX, top, baseTop: top, x0: 0, x1: x, colW: T };
+  return { level, seed: seed >>> 0, traverse: true, ground, floats, enemies, chests, climbables, hazards, bossPit, bossSign, challenger, width: x, exitX, top, baseTop: top, x0: 0, x1: x, colW: T };
 }
 const genArena = genTerrain;   // the boss arena is the classic single-screen terrain
 // Ground top at world-x for a traversal level (floats excluded), or null over a hole.
@@ -1814,6 +1821,38 @@ function updatePickables(dt) {
   Game.pickups = Game.pickups.filter((p) => !p.dead);
 }
 
+// ── Hazards ───────────────────────────────────────────────────────
+const HAZARD_KINDS = ['spikes', 'saw', 'geyser', 'lightning', 'fireball', 'flamejet', 'fallrock', 'tornado', 'mace', 'acid', 'urchin', 'sparkcloud'];
+// The (possibly moving/pulsing) damaging box of a hazard right now: {x0,y0,x1,y1,on}.
+function hazardBox(hz) {
+  const tt = Game.t + hz.ph, x = hz.x, top = hz.top, R = hz.range || 22;
+  switch (hz.kind) {
+    case 'spikes':     return { x0: x - 9, y0: top - 9, x1: x + 9, y1: top, on: true };
+    case 'urchin':     return { x0: x - 7, y0: top - 14, x1: x + 7, y1: top, on: true };
+    case 'acid':       return { x0: x - 11, y0: top - 5, x1: x + 11, y1: top, on: true };
+    case 'saw':      { const sx = x + Math.sin(tt * 1.8) * R; return { x0: sx - 9, y0: top - 18, x1: sx + 9, y1: top, on: true }; }
+    case 'fireball': { const fy = top - 24 - Math.abs(Math.sin(tt * 2.2)) * 26; return { x0: x - 7, y0: fy - 7, x1: x + 7, y1: fy + 7, on: true }; }
+    case 'tornado':  { const sx = x + Math.sin(tt * 1.1) * R; return { x0: sx - 8, y0: top - 46, x1: sx + 8, y1: top, on: true }; }
+    case 'mace':     { const a = Math.sin(tt * 2) * 1.15, len = 36, mx = x + Math.sin(a) * len, my = (top - 56) + Math.cos(a) * len; return { x0: mx - 8, y0: my - 8, x1: mx + 8, y1: my + 8, on: true }; }
+    case 'geyser':   { const on = (tt % 3) < 1.3; return { x0: x - 7, y0: top - (on ? 42 : 0), x1: x + 7, y1: top, on }; }
+    case 'flamejet': { const on = (tt % 2) < 1; return { x0: x, y0: top - 12, x1: x + 26, y1: top - 2, on }; }
+    case 'lightning':{ const on = (tt % 2.6) < 0.4; return { x0: x - 4, y0: 0, x1: x + 4, y1: top, on }; }
+    case 'sparkcloud':{ const on = (tt % 1.8) < 0.9, cy = top - 36; return { x0: x - 18, y0: cy - 18, x1: x + 18, y1: cy + 18, on }; }
+    case 'fallrock': { const per = 2.2, y = (tt % per) / per * (top + 30) - 20; return { x0: x - 7, y0: y - 7, x1: x + 7, y1: y + 7, on: y < top }; }
+    default:           return { x0: x - 8, y0: top - 8, x1: x + 8, y1: top, on: true };
+  }
+}
+function updateHazards() {
+  const lvl = Game.levelData, h = Game.hero;
+  if (Game.phase !== 'traverse' || !lvl || !lvl.hazards) return;
+  if (h.ghost > 0 || h.dodgeT > 0 || h.dead || h.hurt > 0) return;
+  const hl = h.x - h.w / 2, hr = h.x + h.w / 2, htop = h.y - h.h, hbot = h.y;
+  for (const hz of lvl.hazards) {
+    const b = hazardBox(hz); if (!b.on) continue;
+    if (hr > b.x0 && hl < b.x1 && hbot > b.y0 && htop < b.y1) { heroHurt(hz.x > h.x); shake(2); break; }
+  }
+}
+
 function updateEnemies(dt) {
   const C = CONFIG, ter = Game.terrain, L = LEVELS[Game.level] || LEVELS[1], h = Game.hero;
 
@@ -2059,7 +2098,7 @@ function update(dt) {
       h.y += ((Input.jumpHeld ? -1 : 0) + (Input.down ? 1 : 0)) * CLIMB_SPEED * dt;
       if (h.y <= onClimb.top) { h.y = onClimb.top; h.climbing = false; h.onGround = true; }   // reached the top perch
       if (h.y > onClimb.bot) h.y = onClimb.bot;                                               // can't go below the ground
-      updatePickables(dt); updateEnemies(dt); updateBoss(dt);
+      updatePickables(dt); updateHazards(); updateEnemies(dt); updateBoss(dt);
       return;
     }
   }
@@ -2136,6 +2175,7 @@ function update(dt) {
   }
 
   updatePickables(dt);
+  updateHazards();
   updateEnemies(dt);
   updateBoss(dt);
 }
@@ -2383,8 +2423,67 @@ function drawTerrain() {
   const segs = ter.traverse ? ter.ground : ter.segments;
   for (const s of segs) { if (fn) fn(s, d); else segDefault(s, d); }
   if (ter.traverse && ter.climbables) for (const c of ter.climbables) drawClimbable(c);
+  if (ter.traverse && ter.hazards) for (const hz of ter.hazards) drawHazardObj(hz);
   if (ter.traverse) for (const f of ter.floats) drawFloat(f, d);
   if (ter.traverse && ter.bossSign) drawBossSign(ter.bossSign);
+}
+// Draw a hazard entity (uses the same animated box as the collision).
+function drawHazardObj(hz) {
+  const b = hazardBox(hz), x = hz.x, top = hz.top, tt = Game.t + hz.ph;
+  const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2;
+  switch (hz.kind) {
+    case 'spikes': case 'urchin':
+      ctx.fillStyle = hz.kind === 'urchin' ? '#5b3a6b' : '#8a909b';
+      for (let sx = b.x0; sx < b.x1 - 1; sx += 4) { ctx.beginPath(); ctx.moveTo(sx, top); ctx.lineTo(sx + 2, b.y0); ctx.lineTo(sx + 4, top); ctx.fill(); }
+      if (hz.kind === 'urchin') { ctx.fillStyle = '#3a2547'; ctx.beginPath(); ctx.arc(x, top - 5, 5, 0, 7); ctx.fill(); }
+      break;
+    case 'acid':
+      ctx.fillStyle = '#7cf24a'; ctx.fillRect(b.x0, top - 4, b.x1 - b.x0, 4);
+      ctx.fillStyle = '#adff6b'; for (let i = 0; i < 3; i++) { const bx = b.x0 + 3 + ((tt * 20 + i * 9) % (b.x1 - b.x0 - 6)); ctx.fillRect(bx, top - 6 - (Math.sin(tt * 6 + i) * 2 + 2), 2, 2); }
+      break;
+    case 'saw':
+      ctx.save(); ctx.translate(cx, top - 9); ctx.rotate(tt * 12); ctx.fillStyle = '#c9d0da';
+      for (let i = 0; i < 8; i++) { const a = i / 8 * 6.283; ctx.beginPath(); ctx.moveTo(Math.cos(a) * 5, Math.sin(a) * 5); ctx.lineTo(Math.cos(a + 0.3) * 9, Math.sin(a + 0.3) * 9); ctx.lineTo(Math.cos(a + 0.6) * 5, Math.sin(a + 0.6) * 5); ctx.fill(); }
+      ctx.fillStyle = '#7d838e'; ctx.beginPath(); ctx.arc(0, 0, 4, 0, 7); ctx.fill(); ctx.restore();
+      break;
+    case 'fireball':
+      ctx.fillStyle = '#ffca6b'; ctx.beginPath(); ctx.arc(cx, cy, 7, 0, 7); ctx.fill();
+      ctx.fillStyle = '#e8731e'; ctx.beginPath(); ctx.arc(cx, cy + 1, 4, 0, 7); ctx.fill();
+      ctx.fillStyle = 'rgba(255,120,40,0.5)'; ctx.beginPath(); ctx.arc(cx, cy + 6, 4, 0, 7); ctx.fill();
+      break;
+    case 'tornado':
+      ctx.fillStyle = 'rgba(200,210,230,0.5)';
+      for (let y = b.y0; y < top; y += 3) { const w = 3 + (y - b.y0) / (top - b.y0) * 7, wob = Math.sin(tt * 8 + y * 0.3) * 3; ctx.fillRect(cx + wob - w / 2, y, w, 2); }
+      break;
+    case 'mace':
+      ctx.strokeStyle = '#9aa0ab'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, top - 56); ctx.lineTo(cx, cy); ctx.stroke();
+      ctx.fillStyle = '#5a606b'; ctx.beginPath(); ctx.arc(cx, cy, 6, 0, 7); ctx.fill();
+      ctx.fillStyle = '#3c414a'; for (let i = 0; i < 6; i++) { const a = i / 6 * 6.283; ctx.fillRect(cx + Math.cos(a) * 6 - 1, cy + Math.sin(a) * 6 - 1, 3, 3); }
+      break;
+    case 'geyser':
+      ctx.fillStyle = '#7d5a2a'; ctx.fillRect(x - 8, top - 3, 16, 3);   // vent
+      if (b.on) { ctx.fillStyle = '#ff7a00'; ctx.fillRect(x - 5, b.y0, 10, top - b.y0); ctx.fillStyle = '#ffca6b'; ctx.fillRect(x - 2, b.y0, 4, top - b.y0); }
+      break;
+    case 'flamejet':
+      ctx.fillStyle = '#3c414a'; ctx.fillRect(x - 4, top - 12, 4, 12);   // nozzle
+      if (b.on) { ctx.fillStyle = '#e8731e'; ctx.fillRect(x, top - 11, 26, 9); ctx.fillStyle = '#ffca6b'; ctx.fillRect(x, top - 8, 22, 3); }
+      break;
+    case 'lightning':
+      ctx.fillStyle = '#4a4e57'; ctx.beginPath(); ctx.arc(x, 10, 8, 0, 7); ctx.arc(x + 8, 12, 6, 0, 7); ctx.fill();   // cloud
+      if (b.on) { ctx.strokeStyle = '#fff27a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x, 16); for (let y = 16; y < top; y += 14) ctx.lineTo(x + (Math.random() * 8 - 4), y); ctx.stroke(); }
+      break;
+    case 'sparkcloud': {
+      ctx.fillStyle = '#37415f'; ctx.beginPath(); ctx.arc(x, top - 36, 9, 0, 7); ctx.arc(x + 8, top - 34, 7, 0, 7); ctx.arc(x - 8, top - 34, 7, 0, 7); ctx.fill();
+      if (b.on) { ctx.strokeStyle = '#8fd0ff'; ctx.lineWidth = 1; for (let i = 0; i < 5; i++) { const a = tt * 6 + i * 1.26, r = 8 + (tt * 30 % 18); ctx.beginPath(); ctx.moveTo(x, top - 34); ctx.lineTo(x + Math.cos(a) * r, top - 34 + Math.sin(a) * r); ctx.stroke(); } }
+      break;
+    }
+    case 'fallrock':
+      ctx.fillStyle = '#6d727d'; ctx.beginPath(); ctx.arc(cx, cy, 7, 0, 7); ctx.fill();
+      ctx.fillStyle = '#4a4e57'; ctx.fillRect(cx - 3, cy - 2, 3, 3);
+      break;
+    default:
+      ctx.fillStyle = '#e0392f'; ctx.fillRect(b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0);
+  }
 }
 // A climbable — rope / ladder / vine / chain / pole — from its top perch down to the ground.
 function drawClimbable(c) {
@@ -3146,6 +3245,8 @@ window.BS = {
   // The Challenger / pickleball
   challenger: () => Game.levelData && Game.levelData.challenger,
   climbables: () => Game.levelData && Game.levelData.climbables,
+  hazards: () => Game.levelData && Game.levelData.hazards,
+  hazardBox,
   startPickle, setupPickle, endPickle, resumePickle,
   pickle: () => Game.pickle,
   pickleWins: () => Game.pickleWins,
