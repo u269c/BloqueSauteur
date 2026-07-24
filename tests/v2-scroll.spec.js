@@ -276,6 +276,30 @@ test.describe('v1.7 · hazards (22 types)', () => {
     expect(r.leaks).toBeGreaterThan(0);      // neg. control: not all kinds fit one world
   });
 
+  test('ground hazards are fairly spaced — a safe strip between every adjacent pair', async ({ page }) => {
+    const r = await page.evaluate(() => {
+      const reach = window.BS.hazardReach, C = window.BS.CONFIG, TIER = 26, SAFE = 40;
+      const groundTier = (h) => h.top != null && h.top >= C.PLAT_Y - TIER;   // ground / one-tier plateau (not the sky maze)
+      const adjacentGaps = (filter) => {
+        const gaps = [];
+        for (let lv = 2; lv <= 5; lv++) for (let s = 0; s < 60; s++) {
+          const hs = (window.BS.genLevel(lv, s).hazards || []).filter(filter).slice().sort((a, b) => a.x - b.x);
+          for (let i = 1; i < hs.length; i++) gaps.push(Math.abs(hs[i].x - hs[i - 1].x) - reach(hs[i].kind, hs[i].range) - reach(hs[i - 1].kind, hs[i - 1].range));
+        }
+        return gaps;
+      };
+      const ground = adjacentGaps(groundTier);
+      const sky = adjacentGaps((h) => h.top != null && h.top < C.PLAT_Y - TIER);   // gauntlet maze hazards
+      return { minGround: Math.min(...ground), nGround: ground.length, tightSky: sky.some((g) => g < SAFE), nSky: sky.length, SAFE };
+    });
+    expect(r.nGround).toBeGreaterThan(50);
+    expect(r.minGround).toBeGreaterThanOrEqual(r.SAFE - 1);   // every adjacent ground pair keeps the safe strip
+    // neg. control: the sky-gauntlet maze is NOT ground-spaced — it legitimately has closer pairs,
+    // which proves the gap metric would flag crowding (the ground guarantee isn't vacuous).
+    expect(r.nSky).toBeGreaterThan(10);
+    expect(r.tightSky).toBe(true);
+  });
+
   test('a hazard hurts the hero; ghost/dodge passes through (neg. control)', async ({ page }) => {
     const hp = (ghost) => page.evaluate((ghost) => {
       window.BS.start(); window.BS.reseed(1); window.BS.setLevel(4); window.BS.setMode('normal');
