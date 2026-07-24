@@ -154,3 +154,47 @@ test.describe('v2.0 · boss-arena spec (holes + boxes per level)', () => {
     expect(await Promise.all([1, 2, 3, 4, 5].map((l) => boxes(l, 'rage')))).toEqual([1, 1, 2, 2, 2]);
   });
 });
+
+test.describe('v1.7 · level tuning (bigger, fewer holes, raised grounds)', () => {
+  test('L2 has the biggest platforms; all floats sit above ground level (no walk-through base)', async ({ page }) => {
+    const r = await page.evaluate(() => {
+      const C = window.BS.CONFIG, T = C.TILE;
+      const stat = (lv) => { const l = window.BS.genLevel(lv, 4); return {
+        avg: l.ground.reduce((s, g) => s + (g.x1 - g.x0), 0) / l.ground.length / T,
+        raised: l.ground.filter((g) => g.top < C.PLAT_Y).length,
+        maxFloatY: l.floats.length ? Math.max(...l.floats.map((f) => f.y)) : -1e9, top: l.top, tier: 26,
+      }; };
+      return { l1: stat(1), l2: stat(2), l3: stat(3), l5: stat(5) };
+    });
+    expect(r.l2.avg).toBeGreaterThan(r.l1.avg);   // L2 platforms are the biggest
+    expect(r.l2.avg).toBeGreaterThan(r.l3.avg);
+    expect(r.l1.avg).toBeGreaterThan(6);          // all bigger than the old 4-8
+    // every float is at least one tier up (no ground-level float that you fall past)
+    for (const s of [r.l1, r.l2, r.l3, r.l5]) if (s.maxFloatY > -1e8) expect(s.maxFloatY).toBeLessThanOrEqual(s.top - s.tier + 0.01);
+    expect(r.l1.raised + r.l5.raised).toBeGreaterThan(0);   // raised grounds exist
+  });
+
+  test('a raised ground is a solid wall (blocked walking in; can jump onto it)', async ({ page }) => {
+    const r = await page.evaluate(() => {
+      window.BS.start(); window.BS.reseed(1); window.BS.setLevel(1);
+      const C = window.BS.CONFIG, top = C.PLAT_Y, lvl = window.BS.levelData();
+      lvl.ground = [{ x0: 0, x1: 200, top }, { x0: 200, x1: 320, top: top - 26 }, { x0: 320, x1: 700, top }];
+      lvl.floats = []; lvl.width = 700; lvl.exitX = 690; lvl.bossPit = null;
+      const h = window.BS.hero(); Object.assign(h, { x: 150, y: top, vx: 0, vy: 0, onGround: true, ghost: 1e9, dead: false });
+      window.BS.Input.reset(); window.BS.Input.press('right', true);
+      for (let k = 0; k < 90; k++) window.BS.stepFixed(1);
+      const blockedX = h.x, blockedY = h.y;                 // walked into the wall → stopped, stayed low
+      let onTop = false;
+      for (let j = 0; j < 8; j++) {
+        window.BS.Input.press('jump', true);
+        for (let k = 0; k < 20; k++) { window.BS.stepFixed(1); if (h.onGround && h.y < top - 10 && h.x > 205 && h.x < 320) onTop = true; }
+        window.BS.Input.press('jump', false); window.BS.stepFixed(2);
+      }
+      window.BS.Input.reset();
+      return { blockedX, blockedY, top, onTop };
+    });
+    expect(r.blockedX).toBeLessThan(205);            // couldn't walk through the raised wall
+    expect(r.blockedY).toBeGreaterThan(r.top - 6);   // stayed at the low level (didn't teleport up)
+    expect(r.onTop).toBe(true);                      // …but jumping gets you onto the plateau
+  });
+});

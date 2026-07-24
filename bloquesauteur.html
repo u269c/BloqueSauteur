@@ -294,11 +294,11 @@ const LAST_LEVEL = 5;
 // chunks = number of hole+ground segments (levels are ~half their old length).
 // enemies = ~1.3x the old counts (denser — lots on screen at once).
 const TRAVERSE = {
-  1: { chunks: 18, enemies: 27,  chests: 2 },
-  2: { chunks: 14, enemies: 46,  chests: 2 },   // L2 = sky-climb finale into a boss void
-  3: { chunks: 19, enemies: 64,  chests: 3 },
-  4: { chunks: 26, enemies: 82,  chests: 3 },
-  5: { chunks: 27, enemies: 109, chests: 4 },
+  1: { chunks: 14, enemies: 27,  chests: 2 },
+  2: { chunks: 11, enemies: 46,  chests: 2 },   // L2 = sky-climb finale into a boss void
+  3: { chunks: 15, enemies: 64,  chests: 3 },
+  4: { chunks: 20, enemies: 82,  chests: 3 },
+  5: { chunks: 23, enemies: 109, chests: 4 },
 };
 // Treasure-chest loot: stomp a chest to pop a mushroom. ~25% of chests are "bad".
 const GOOD_SHROOMS = ['highjump', 'teleport', 'heal', 'money'];
@@ -645,22 +645,28 @@ function genLevel(level, seed) {
   let x = 0;
   const ENTRANCE = Math.round(C.W * 0.55);                 // safe run-up: no holes near the start
   ground.push({ x0: 0, x1: ENTRANCE, top }); x = ENTRANCE;
-  const bigProb = Math.min(0.6, 0.15 + level * 0.08);      // higher levels lean on staircases
   const maxTier = Math.min(4, 1 + Math.floor(level / 1.5));
+  const pHole = 0.14, pStair = Math.min(0.26, 0.05 + level * 0.04), pRaised = 0.34;   // fewer holes; more solid + raised ground
+  const gwMin = level === 2 ? 9 : 6, gwRange = level === 2 ? 6 : 5;                    // bigger platforms (esp. L2)
   for (let i = 0; i < p.chunks; i++) {
-    if (rand() < bigProb && maxTier >= 2) {
-      // large hole crossed by a float staircase (ascend to a peak tier, then descend)
-      const peak = 2 + Math.floor(rand() * (maxTier - 1)), steps = peak * 2 + 1, stepW = 30 + Math.floor(rand() * 8), fw = 24;
-      for (let s = 0; s < steps; s++) { const tier = peak - Math.abs(peak - s); floats.push({ x: Math.round(x + 6 + s * stepW), y: top - tier * TIER, w: fw }); }
-      x += 12 + steps * stepW;
-    } else {
-      // small jumpable hole; usually with a single jump-up float over it
+    let gap = false;
+    const r = rand();
+    if (r < pStair && maxTier >= 2) {
+      // large hole crossed by a float PYRAMID (tiers 1..peak..1). The base floats overlap the
+      // adjacent grounds so you jump straight up onto the pyramid — no walk-through gap.
+      const peak = 2 + Math.floor(rand() * (maxTier - 1)), steps = peak * 2 - 1, stepW = 28 + Math.floor(rand() * 6), fw = 32, startX = x - 10;
+      for (let s = 0; s < steps; s++) { const tier = peak - Math.abs((peak - 1) - s); floats.push({ x: Math.round(startX + s * stepW), y: top - tier * TIER, w: fw }); }
+      x = startX + (steps - 1) * stepW + fw - 10; gap = true;
+    } else if (r < pStair + pHole) {
+      // small jumpable hole, usually with a single jump-up float over it
       const hw = (2 + Math.floor(rand() * 2)) * T;
-      if (rand() < 0.6) floats.push({ x: Math.round(x + hw / 2 - 12), y: top - (1 + Math.floor(rand() * 2)) * TIER, w: 24 });
-      x += hw;
+      if (rand() < 0.6) floats.push({ x: Math.round(x + hw / 2 - 14), y: top - (1 + Math.floor(rand() * 2)) * TIER, w: 28 });
+      x += hw; gap = true;
     }
-    const gw = (4 + Math.floor(rand() * 4)) * T;
-    ground.push({ x0: x, x1: x + gw, top }); x += gw;
+    // ground run — bigger; on contiguous ground it may rise into a raised plateau (jump onto it)
+    const gw = (gwMin + Math.floor(rand() * gwRange)) * T;
+    const gtop = (!gap && rand() < pRaised) ? top - (1 + (rand() < 0.4 ? 1 : 0)) * TIER : top;
+    ground.push({ x0: x, x1: x + gw, top: gtop }); x += gw;
   }
   // ── exit ──
   let exitX, bossPit = null, bossSign = null;
@@ -1646,13 +1652,23 @@ function collideHeroScroll(h, dt) {
   h.x += h.vx * dt;
   if (h.x < hw) { h.x = hw; if (h.vx < 0) h.vx = 0; }               // left wall
   if (h.x > lvl.width - hw) h.x = lvl.width - hw;                    // clamp to level end
+  // raised-ground side walls: a segment whose top is above the hero's feet blocks
+  // sideways entry (you must jump onto it). Flat same-height ground never walls.
+  { const l = h.x - hw, r = h.x + hw;
+    for (const g of lvl.ground) {
+      if (h.y > g.top + 4 && r > g.x0 && l < g.x1) {
+        if (h.vx > 0 && l < g.x0) { h.x = g.x0 - hw; h.vx = 0; }
+        else if (h.vx < 0 && r > g.x1) { h.x = g.x1 + hw; h.vx = 0; }
+      }
+    }
+  }
   // vertical
   const feetPrev = h.y;                                             // feet before this step
   h.y += h.vy * dt;
   h.onGround = false;
   if (h.vy >= 0) {
     let gy = null;
-    for (const g of lvl.ground) if (h.x >= g.x0 && h.x < g.x1 && h.y >= g.top && (gy == null || g.top < gy)) gy = g.top;
+    for (const g of lvl.ground) if (h.x >= g.x0 && h.x < g.x1 && h.y >= g.top && feetPrev <= g.top + 8 && (gy == null || g.top < gy)) gy = g.top;   // land on top (not teleport up through a raised wall)
     for (const f of lvl.floats) if (h.x >= f.x && h.x < f.x + f.w && h.y >= f.y && feetPrev <= f.y + 2 && (gy == null || f.y < gy)) gy = f.y;   // one-way: only when landing from above
     if (gy != null) { h.y = gy; h.vy = 0; h.onGround = true; }
   }
