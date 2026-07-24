@@ -24,7 +24,7 @@ test('merchant appears after the boss and opens the shop', async ({ page }) => {
   expect(await page.evaluate(() => window.BS.scene())).toBe('SHOP');
   expect(await page.evaluate(() => !!window.BS.merchant())).toBe(true);
   await expect(page.locator('#shop')).toBeVisible();
-  const expected = await page.evaluate(() => window.BS.SHOP_ITEMS.length + window.BS.COSTUMES.length);
+  const expected = await page.evaluate(() => window.BS.SHOP_ITEMS.length + window.BS.COSTUMES.filter((c) => c.price < 900).length);   // Bandana (earned) isn't sold
   await expect(page.locator('#shop-grid .shop-item')).toHaveCount(expected);   // skills/hearts + costumes
 });
 

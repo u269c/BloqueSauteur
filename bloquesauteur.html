@@ -199,6 +199,16 @@
     </div>
   </div>
 
+  <div class="overlay hidden" id="challenge">
+    <div class="shop-bubble" style="max-width:min(88vw,420px)">
+      <p style="font-size:min(4.4vmin,20px); margin:0 0 2vmin;">🏓 “I challenge you to a PickleBall match!”</p>
+      <div style="display:flex; gap:2vmin; justify-content:center;">
+        <button class="play-btn" id="challenge-yes">Oui!</button>
+        <button class="play-btn ghost" id="challenge-no">No Thanks</button>
+      </div>
+    </div>
+  </div>
+
 <script>
 "use strict";
 (function () {
@@ -358,7 +368,7 @@ const SHOP_ITEMS = [
   { key: 'twoHearts',  name: 'Two Hearts',    price: 110, blurb: '+2 max hearts (this game)' },
 ];
 // Which owned flags persist between games (purchases) vs reset each game (hearts).
-const PERSISTENT_ITEMS = ['shield', 'doubleJump', 'dodge', 'strongHit'];
+const PERSISTENT_ITEMS = ['shield', 'doubleJump', 'dodge', 'strongHit', 'paddle'];
 
 // Costumes — purchasable patterns worn over the hero body. id 0 is the original
 // striped suit; equipped via the title loadout. Owned set persists per slot.
@@ -381,6 +391,7 @@ const COSTUMES = [
   { id: 14, name: 'Switzerland Kit', price: 140 },
   { id: 15, name: 'Norway Kit',      price: 140 },
   { id: 16, name: 'Japan Kit',       price: 140 },
+  { id: 17, name: 'Bandana',         price: 999 },   // earned by a 2nd pickleball win (not sold)
 ];
 const costumeKey = (id) => 'costume:' + id;
 const MERCHANT = { landY: CONFIG.PLAT_Y, descendV: 42, riseV: 260, hoverAmp: 22 };
@@ -683,7 +694,15 @@ function genLevel(level, seed) {
     const type = bad ? BAD_SHROOMS[Math.floor(rand() * BAD_SHROOMS.length)] : GOOD_SHROOMS[Math.floor(rand() * GOOD_SHROOMS.length)];
     chests.push({ x: Math.round((g.x0 + g.x1) / 2), top: g.top, bad, type, opened: false });
   }
-  return { level, seed: seed >>> 0, traverse: true, ground, floats, enemies, chests, bossPit, bossSign, width: x, exitX, top, baseTop: top, x0: 0, x1: x, colW: T };
+  // The Challenger: a stationary adventurer on L4, ~1/3 through the level.
+  let challenger = null;
+  if (level === 4) {
+    const targetX = exitX / 3;
+    let g = ground[1] || ground[0];
+    for (const seg of ground) if (Math.abs((seg.x0 + seg.x1) / 2 - targetX) < Math.abs((g.x0 + g.x1) / 2 - targetX)) g = seg;
+    challenger = { x: Math.round((g.x0 + g.x1) / 2), top: g.top, done: false };
+  }
+  return { level, seed: seed >>> 0, traverse: true, ground, floats, enemies, chests, bossPit, bossSign, challenger, width: x, exitX, top, baseTop: top, x0: 0, x1: x, colW: T };
 }
 const genArena = genTerrain;   // the boss arena is the classic single-screen terrain
 // Ground top at world-x for a traversal level (floats excluded), or null over a hole.
@@ -719,7 +738,10 @@ function findSafeX(terrain) {
 //  STATE
 // ══════════════════════════════════════════════════════════════════
 const Game = {
-  scene: 'TITLE',        // TITLE | INTRO | PLAY | CLEAR | SHOP | VICTORY | GAMEOVER (PAUSE is a flag)
+  scene: 'TITLE',        // TITLE | INTRO | PLAY | CLEAR | SHOP | PICKLE | VICTORY | GAMEOVER (PAUSE is a flag)
+  pickle: null,          // pickleball minigame state (The Challenger)
+  transition: null,      // spiral screen transition {t, dur, swapped, cb}
+  pickleWins: 0,         // pickleball match wins (persisted per slot)
   paused: false,
   seed: 0,
   rand: null,            // active PRNG (reseeded per game)
@@ -773,9 +795,9 @@ const Game = {
 // (not persisted). Muted is global. SAVE_VERSION bump wipes old saves.
 const SAVE_VERSION = 3;   // v2.0: costumes moved from a boolean to an owned-set + equipped idx
 // All shop "owned" flags, cleared. Persistent skills + per-run hearts/costume in one shape.
-function blankOwned() { return { shield: false, doubleJump: false, dodge: false, strongHit: false, heart: false, twoHearts: false, halfHeart: false, costumes: [] }; }
+function blankOwned() { return { shield: false, doubleJump: false, dodge: false, strongHit: false, paddle: false, heart: false, twoHearts: false, halfHeart: false, costumes: [] }; }
 function freshSlot() {
-  return { owned: { shield: false, doubleJump: false, dodge: false, strongHit: false, costumes: [] }, costumeIdx: -1, rainbowUnlocked: false, colorIdx: 0, mode: 'normal', best: 0 };
+  return { owned: { shield: false, doubleJump: false, dodge: false, strongHit: false, paddle: false, costumes: [] }, costumeIdx: -1, pickleWins: 0, rainbowUnlocked: false, colorIdx: 0, mode: 'normal', best: 0 };
 }
 const Save = {
   KEY: 'bloquesauteur.save',
@@ -804,6 +826,7 @@ const Save = {
     Game.hero.colorIdx = Number.isInteger(s.colorIdx) ? s.colorIdx : 0;
     if (PALETTE[Game.hero.colorIdx] && PALETTE[Game.hero.colorIdx].rainbow && !Game.rainbowUnlocked) Game.hero.colorIdx = 0;
     Game.hero.costumeIdx = (Number.isInteger(s.costumeIdx) && Game.owned.costumes.includes(s.costumeIdx)) ? s.costumeIdx : -1;
+    Game.pickleWins = s.pickleWins | 0;
     this.save();
   },
   // Write only PERSISTENT progress back into the active slot + persist.
@@ -813,7 +836,7 @@ const Save = {
       const owned = {}; for (const k of PERSISTENT_ITEMS) owned[k] = !!(Game.owned && Game.owned[k]);
       owned.costumes = (Game.owned && Array.isArray(Game.owned.costumes)) ? Game.owned.costumes.slice() : [];
       this.data.slots[i] = {
-        owned, costumeIdx: Game.hero.costumeIdx, rainbowUnlocked: !!Game.rainbowUnlocked, colorIdx: Game.hero.colorIdx, mode: Game.mode, best: Game.best | 0,
+        owned, costumeIdx: Game.hero.costumeIdx, pickleWins: Game.pickleWins | 0, rainbowUnlocked: !!Game.rainbowUnlocked, colorIdx: Game.hero.colorIdx, mode: Game.mode, best: Game.best | 0,
       };
     }
     this.data.muted = Audio.muted;
@@ -946,6 +969,8 @@ function initInput() {
   const on = (id, fn) => document.getElementById(id).addEventListener('click', (e) => { e.preventDefault(); onFirstGesture(); fn(); });
   on('play-btn', () => startGame());
   on('shop-leave', () => closeShop());
+  on('challenge-yes', () => { hideOverlay('challenge'); Game.paused = false; Audio.applyGain(); startPickle(); });
+  on('challenge-no', () => { hideOverlay('challenge'); Game.paused = false; Audio.applyGain(); if (Game.levelData && Game.levelData.challenger) Game.levelData.challenger.done = true; });
   on('resume-btn', () => togglePause(false));
   on('quit-btn', () => quitToTitle());
   on('pause-btn', () => { if (Game.scene === 'PLAY') togglePause(); });
@@ -1142,7 +1167,7 @@ function costumeIdOf(key) { return (typeof key === 'string' && key.startsWith('c
 function itemOwned(key) { const cid = costumeIdOf(key); return cid != null ? Game.owned.costumes.includes(cid) : !!Game.owned[key]; }
 // The full shop catalogue: skills/hearts + every costume.
 function shopCatalogue() {
-  return SHOP_ITEMS.concat(COSTUMES.map((c) => ({ key: costumeKey(c.id), name: c.name, price: c.price, blurb: 'Costume: ' + c.name })));
+  return SHOP_ITEMS.concat(COSTUMES.filter((c) => c.price < 900).map((c) => ({ key: costumeKey(c.id), name: c.name, price: c.price, blurb: 'Costume: ' + c.name })));   // price>=900 = earned only (Bandana)
 }
 function buyItem(key) {
   const item = shopCatalogue().find((i) => i.key === key); if (!item) return;
@@ -1405,6 +1430,109 @@ function onGameOver() { Game.scene = 'GAMEOVER'; Game.sceneT = 0; Audio.stopMusi
 function gotoTitle() {
   Game.scene = 'TITLE'; Game.paused = false; Game.points = 0; Audio.stopMusic(); Audio.playMusic('title');   // quitting resets points
   showOverlay('start'); hideOverlay('pause'); showTitlePanel();
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  THE CHALLENGER — pickleball minigame (L4), with a spiral transition
+// ══════════════════════════════════════════════════════════════════
+const PB = { courtY: 205, netX: 240, netTop: 150, g: 780, hMin: 40, hMax: 224, aMin: 256, aMax: 440, target: 5, cap: 7 };
+
+// Spiral screen transition: swirl the frame into the centre, swap at the midpoint, swirl back.
+function beginTransition(cb) { Game.transition = { t: 0, dur: 1.1, swapped: false, cb }; }
+function updateTransition(dt) {
+  const tr = Game.transition; tr.t += dt;
+  if (!tr.swapped && tr.t >= tr.dur / 2) { tr.swapped = true; if (tr.cb) tr.cb(); }
+  if (tr.t >= tr.dur) Game.transition = null;
+}
+
+function startPickle() { if (Game.levelData && Game.levelData.challenger) Game.levelData.challenger.done = true; beginTransition(setupPickle); }
+function setupPickle() {
+  Game.scene = 'PICKLE'; Game.paused = false; Game.cam.x = 0;
+  Game.pickle = {
+    hero: { x: 130, y: PB.courtY, vy: 0, onGround: true },
+    ai: { x: 360 }, ball: { x: 130, y: PB.courtY - 44, vx: 0, vy: 0, r: 5, live: false, floor: 0, last: 'hero' },
+    scoreH: 0, scoreA: 0, server: 'hero', state: 'serve', stateT: 0.9, msg: 'GET READY', reward: '', won: false, overT: 0, hitAnim: 0, aiHitAnim: 0, aiMiss: false,
+  };
+  Audio.stopMusic(); Audio.playMusic('merchant');
+}
+function pickleServe(p) {
+  const fromHero = p.server === 'hero';
+  Object.assign(p.ball, { x: fromHero ? 140 : 340, y: PB.courtY - 44, vx: (fromHero ? 1 : -1) * 150, vy: -270, r: 5, live: true, floor: 0, last: p.server });
+  p.aiMiss = Math.random() < 0.28;          // will the AI whiff this rally?
+  p.state = 'rally';
+}
+function pickleAward(p, side) {   // `side` = who WON the point
+  if (side === 'hero') p.scoreH++; else p.scoreA++;
+  p.server = side;
+  const mx = Math.max(p.scoreH, p.scoreA);
+  const done = (mx >= PB.target && Math.abs(p.scoreH - p.scoreA) >= 2) || mx >= PB.cap;   // first to 5 (win by 2), hard cap 7
+  if (done) { endPickle(p.scoreH > p.scoreA); return; }
+  p.state = 'point'; p.stateT = 0.8; p.msg = side === 'hero' ? 'YOUR POINT' : 'THEIR POINT'; p.ball.live = false;
+}
+function endPickle(won) {
+  const p = Game.pickle; p.state = 'over'; p.overT = 0; p.won = won; p.ball.live = false;
+  if (won) {
+    Game.pickleWins++;
+    if (Game.pickleWins === 1) { Game.owned.paddle = true; p.reward = 'A PICKLEBALL PADDLE!'; }
+    else if (Game.pickleWins === 2) { if (!Game.owned.costumes.includes(17)) Game.owned.costumes.push(17); Game.hero.costumeIdx = 17; p.reward = 'A BANDANA COSTUME!'; }
+    else { Game.points += 50; p.reward = '+50 POINTS'; }
+  } else { Game.points = Math.max(0, Game.points - 25); p.reward = '−25 POINTS'; }
+  Save.save();
+}
+function resumePickle() {
+  Game.scene = 'PLAY'; Game.pickle = null;
+  const ch = Game.levelData.challenger, h = Game.hero;
+  Object.assign(h, { x: ch.x + 26, y: ch.top, vx: 0, vy: 0, onGround: true, dead: false, hurt: 0, knock: 0, ghost: 0, frozen: 0, dizzy: 0 });
+  Game.cam.x = Math.max(0, Math.min(Game.levelData.width - CONFIG.W, Math.round(h.x - CONFIG.W * 0.4)));
+  Audio.playMusic(Game.level);
+}
+
+function updatePickle(dt) {
+  const p = Game.pickle; if (!p) return;
+  p.stateT -= dt; if (p.hitAnim > 0) p.hitAnim -= dt; if (p.aiHitAnim > 0) p.aiHitAnim -= dt;
+  const hero = p.hero, ball = p.ball;
+  // hero movement (left half) + jump
+  const dir = (Input.right ? 1 : 0) - (Input.left ? 1 : 0);
+  hero.x = Math.max(PB.hMin, Math.min(PB.hMax, hero.x + dir * 150 * dt));
+  if (Input.consumeJump() && hero.onGround) { hero.vy = -300; hero.onGround = false; Audio.sfx('jump'); }
+  hero.vy += PB.g * dt; hero.y += hero.vy * dt;
+  if (hero.y >= PB.courtY) { hero.y = PB.courtY; hero.vy = 0; hero.onGround = true; }
+
+  if (p.state === 'serve') { if (p.stateT <= 0) pickleServe(p); return; }
+  if (p.state === 'point') { if (p.stateT <= 0) { p.state = 'serve'; p.stateT = 0.7; p.msg = ''; } return; }
+  if (p.state === 'over') {
+    p.overT += dt;
+    if (p.overT > 2.2 && !Game.transition) beginTransition(resumePickle);
+    return;
+  }
+  // ── rally: ball physics ──
+  if (!ball.live) return;
+  ball.vy += PB.g * dt; ball.x += ball.vx * dt; ball.y += ball.vy * dt;
+  // floor bounce (balloon shrinks back)
+  if (ball.y >= PB.courtY) {
+    ball.y = PB.courtY; ball.vy = -Math.abs(ball.vy) * 0.62; ball.floor++; ball.r = 5; Audio.sfx('land');
+    if (ball.floor >= 2) { pickleAward(p, ball.x < PB.netX ? 'ai' : 'hero'); return; }   // bounced twice on a side → other scores
+  }
+  // net: a ball that reaches the net band too low is a fault by whoever hit it
+  if (ball.x > PB.netX - 3 && ball.x < PB.netX + 3 && ball.y > PB.netTop) { pickleAward(p, ball.last === 'hero' ? 'ai' : 'hero'); return; }
+  // baselines (missed return)
+  if (ball.x < 16) { pickleAward(p, 'ai'); return; }
+  if (ball.x > 464) { pickleAward(p, 'hero'); return; }
+  // hero return (contact; airborne = smash)
+  if (ball.x < PB.netX && Math.abs(ball.x - hero.x) < 15 && ball.y > hero.y - 24 && ball.last !== 'hero') {
+    const smash = !hero.onGround;
+    ball.vx = smash ? 275 : 150; ball.vy = smash ? -190 : -320; ball.r = smash ? 5 : 8; ball.last = 'hero'; ball.floor = 0;
+    p.hitAnim = 0.18; Audio.sfx('stomp');
+  }
+  // AI: track the ball; return it unless whiffing this rally
+  if (ball.x > PB.netX) {
+    p.ai.x += Math.max(-260 * dt, Math.min(260 * dt, ball.x - p.ai.x));
+    p.ai.x = Math.max(PB.aMin, Math.min(PB.aMax, p.ai.x));
+    if (!p.aiMiss && Math.abs(ball.x - p.ai.x) < 15 && ball.y > PB.courtY - 30 && ball.last !== 'ai') {
+      ball.vx = -(150 + Math.random() * 60); ball.vy = -300; ball.r = 6; ball.last = 'ai'; ball.floor = 0;
+      p.aiHitAnim = 0.18; Audio.sfx('stomp');
+    }
+  }
 }
 
 // Tap / key on a transient screen advances it.
@@ -1857,6 +1985,7 @@ function updateBoss(dt) {
 }
 
 function update(dt) {
+  if (Game.transition) { updateTransition(dt); return; }   // spiral swap in progress
   Game.sceneT += dt;
   if (Game.scene === 'PLAY' && !Game.paused) Game.t += dt;
   updateParticles(dt);
@@ -1865,9 +1994,14 @@ function update(dt) {
   if (Game.scene === 'INTRO' && Game.sceneT >= 1.6) { gotoPlay(); return; }
   if (Game.scene === 'CLEAR' && Game.sceneT >= 2.4) { afterClear(); return; }
   if (Game.scene === 'SHOP') { updateMerchant(dt); return; }
+  if (Game.scene === 'PICKLE') { if (!Game.paused) updatePickle(dt); return; }
   if (Game.scene !== 'PLAY' || Game.paused) return;
 
   const h = Game.hero, C = CONFIG;
+
+  // The Challenger: near the L4 adventurer → pause and pop the challenge prompt
+  const ch = Game.phase === 'traverse' && Game.levelData ? Game.levelData.challenger : null;
+  if (ch && !ch.done && h.onGround && Math.abs(h.x - ch.x) < 22) { Game.paused = true; Audio.applyGain(); showOverlay('challenge'); return; }
 
   // timers
   if (h.hurt > 0) h.hurt = Math.max(0, h.hurt - dt);
@@ -2265,7 +2399,12 @@ function drawArmKnife(c, ax, ay, dir) {
   const hand = dir > 0 ? ax + 4 : ax - 6;                                            // outer end (fist)
   c.fillStyle = '#0a0a0a'; c.fillRect(dir > 0 ? ax : ax - 4, ay, 4, 2);              // arm (horizontal)
   c.fillStyle = '#8a5a30'; c.fillRect(hand, ay - 1, 2, 2);                           // hilt / fist
-  c.fillStyle = '#d7dde4'; c.fillRect(hand, ay - 6, 2, 5);                           // blade pointing up
+  if (Game.owned.paddle) {                                                          // pickleball prize: a paddle instead of a knife
+    c.fillStyle = '#1f6f3a'; c.fillRect(hand - 1, ay - 8, 4, 6);                     // paddle head
+    c.fillStyle = '#134d28'; c.fillRect(hand, ay - 7, 2, 4);
+  } else {
+    c.fillStyle = '#d7dde4'; c.fillRect(hand, ay - 6, 2, 5);                         // blade pointing up
+  }
 }
 
 // Paint an owned costume pattern over the hero body interior (x,y = body top-left,
@@ -2341,6 +2480,10 @@ function drawCostume(c, x, y, w, h, id, col) {
     case 16: // Japan — Samurai blue, red rising-sun disc
       c.fillStyle = '#0a1e5e'; c.fillRect(ix, iy, iw, ih);
       c.fillStyle = '#e60026'; c.beginPath(); c.arc(cx, cy, Math.min(iw, ih) * 0.28, 0, 7); c.fill();
+      break;
+    case 17: // Bandana — red paisley-ish print (earned at the pickleball hall)
+      c.fillStyle = '#b3122a'; c.fillRect(ix, iy, iw, ih);
+      c.fillStyle = '#f2e9d0'; for (let gy = 0; gy < ih; gy += 3) for (let gx = (((gy / 3) | 0) & 1) ? 1.5 : 0; gx < iw; gx += 3) { c.fillRect(ix + gx, iy + gy, 1, 1); c.fillRect(ix + gx + 0.5, iy + gy + 0.5, 1.4, 1.4); }
       break;
     default: // fallback: plain colour block
       c.fillStyle = col; c.fillRect(ix, iy, iw, ih);
@@ -2647,6 +2790,7 @@ function drawMerchant() {
 
 function render() {
   const C = CONFIG;
+  if (Game.scene === 'PICKLE') { drawPickle(); if (Game.transition) applySpiral(); updateShieldButton(); return; }
   ctx.save();
   // screen shake
   if (Game.shakeMag > 0) {
@@ -2670,6 +2814,7 @@ function render() {
     if (boxes >= 1) drawSpawner(C.SPAWN_X);
     if (boxes >= 2) drawSpawner(C.SPAWN_X_L);
   }
+  if (Game.phase === 'traverse' && Game.levelData && Game.levelData.challenger) drawChallenger(Game.levelData.challenger);
   const live = Game.scene === 'PLAY' || Game.scene === 'INTRO' || Game.scene === 'CLEAR' || Game.scene === 'SHOP';
   if (live) { drawEnemies(); drawBoss(); drawHero(); }
   for (const pk of Game.pickups) drawPickup(pk);
@@ -2687,6 +2832,7 @@ function render() {
 
   ctx.restore();
   if (Game.hero.dizzy > 0) applyWave();   // poison mushroom: ripple the whole composited frame
+  if (Game.transition) applySpiral();      // spiral into/out of the pickleball match
   updateShieldButton();
 }
 // Post-process ripple for the poison-mushroom wobble: snapshot the frame, then re-blit it
@@ -2700,6 +2846,77 @@ function applyWave() {
   ctx.clearRect(0, 0, W, H);
   const amp = 7, t = Game.t * 7;
   for (let y = 0; y < H; y += 2) { const dx = Math.sin(y * 0.22 + t) * amp; ctx.drawImage(waveBuf, 0, y, W, 2, dx, y, W, 2); }
+}
+// Spiral transition: snapshot the frame and re-draw it rotating + scaling toward the centre
+// (shrinking to a point on the way in, growing back on the way out), fading through black.
+const spiralBuf = document.createElement('canvas');
+function applySpiral() {
+  const W = CONFIG.W, H = CONFIG.H, tr = Game.transition;
+  if (spiralBuf.width !== W) { spiralBuf.width = W; spiralBuf.height = H; }
+  const sc = spiralBuf.getContext('2d');
+  sc.clearRect(0, 0, W, H); sc.drawImage(canvas, 0, 0, W, H);
+  const half = tr.dur / 2, k = tr.t < half ? tr.t / half : (tr.dur - tr.t) / half;   // 1→0→1 (0 at midpoint)
+  const scale = Math.max(0.001, k), rot = (1 - k) * Math.PI * 4;
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  ctx.save();
+  ctx.globalAlpha = k;
+  ctx.translate(W / 2, H / 2); ctx.rotate(rot); ctx.scale(scale, scale); ctx.translate(-W / 2, -H / 2);
+  ctx.drawImage(spiralBuf, 0, 0, W, H);
+  ctx.restore();
+}
+// The Challenger NPC standing in the L4 level (speech bubble when the hero is near).
+function drawChallenger(ch) {
+  const x = ch.x, y = ch.top;
+  ctx.fillStyle = '#0a0a0a'; ctx.fillRect(x - 5, y - 16, 10, 16);            // body
+  ctx.fillStyle = '#b3122a'; ctx.fillRect(x - 5, y - 12, 10, 3);            // bandana/sash
+  ctx.fillStyle = '#e8c58a'; ctx.fillRect(x - 3, y - 20, 6, 5);            // head
+  ctx.fillStyle = '#1f6f3a'; ctx.fillRect(x + 4, y - 12, 4, 6);            // paddle in hand
+  ctx.fillStyle = '#fff'; ctx.fillRect(x - 2, y - 18, 2, 2);              // eye
+  if (!ch.done && Math.abs(Game.hero.x - ch.x) < 60) {                    // "!" hint when close
+    const b = Math.sin(Game.t * 6) * 1.5;
+    ctx.fillStyle = '#f4d03f'; ctx.font = 'bold 12px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('🏓', x, y - 26 + b); ctx.textAlign = 'left';
+  }
+}
+// The whole pickleball minigame scene (own court; camera not used).
+function drawPickle() {
+  const p = Game.pickle, W = CONFIG.W, H = CONFIG.H;
+  // hall background (a big sports hall; faint courts with matches in the distance)
+  ctx.fillStyle = '#2b3550'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#37415f'; ctx.fillRect(0, 0, W, 72);
+  if (!p) return;
+  ctx.fillStyle = 'rgba(255,255,255,0.06)'; for (let i = 0; i < 3; i++) ctx.fillRect(28 + i * 150, 58, 112, 36);
+  ctx.fillStyle = 'rgba(255,255,255,0.5)'; for (let i = 0; i < 3; i++) ctx.fillRect(28 + i * 150 + 55, 58, 1, 36);   // distant nets
+  ctx.fillStyle = '#f4e04a'; for (let i = 0; i < 3; i++) ctx.fillRect(40 + i * 150 + ((Game.t * 30 + i * 40) % 90), 72 + (i % 2) * 8, 2, 2);   // faraway balls
+  ctx.fillStyle = '#e0d0a0'; ctx.fillRect(0, PB.courtY, W, H - PB.courtY);   // court floor
+  ctx.fillStyle = '#c7b482'; ctx.fillRect(0, PB.courtY, W, 2);
+  ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(0, PB.courtY + 14); ctx.lineTo(W, PB.courtY + 14); ctx.stroke();
+  // net
+  ctx.fillStyle = '#20242c'; ctx.fillRect(PB.netX - 1, PB.netTop, 2, PB.courtY - PB.netTop);
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)'; for (let yy = PB.netTop; yy < PB.courtY; yy += 4) { ctx.beginPath(); ctx.moveTo(PB.netX - 5, yy); ctx.lineTo(PB.netX + 5, yy); ctx.stroke(); }
+  ctx.fillStyle = '#fff'; ctx.fillRect(PB.netX - 6, PB.netTop - 2, 12, 2);
+  // players
+  const hcol = heroColor(Game.hero);
+  ctx.fillStyle = '#0a0a0a'; ctx.fillRect(p.hero.x - 6, p.hero.y - 18, 12, 18);
+  ctx.fillStyle = hcol; ctx.fillRect(p.hero.x - 4, p.hero.y - 15, 8, 6);
+  ctx.fillStyle = '#1f6f3a'; ctx.fillRect(p.hero.x + (p.hitAnim > 0 ? 6 : 4), p.hero.y - 14 - (p.hitAnim > 0 ? 6 : 0), 4, 8);   // paddle swing
+  ctx.fillStyle = '#0a0a0a'; ctx.fillRect(p.ai.x - 6, PB.courtY - 18, 12, 18);
+  ctx.fillStyle = '#b3122a'; ctx.fillRect(p.ai.x - 4, PB.courtY - 15, 8, 5);
+  ctx.fillStyle = '#1f6f3a'; ctx.fillRect(p.ai.x - (p.aiHitAnim > 0 ? 10 : 8), PB.courtY - 14, 4, 8);
+  // ball
+  if (p.ball.live) { ctx.fillStyle = '#f4e04a'; ctx.beginPath(); ctx.arc(p.ball.x, p.ball.y, p.ball.r, 0, 7); ctx.fill(); ctx.strokeStyle = '#c7b100'; ctx.stroke(); }
+  // scoreboard + messages (screen space)
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 20px monospace'; ctx.textAlign = 'center';
+  ctx.fillText(p.scoreH + ' — ' + p.scoreA, W / 2, 30);
+  ctx.font = '10px monospace'; ctx.fillStyle = '#9fb0d0'; ctx.fillText('YOU              CHALLENGER  (first to ' + PB.target + ')', W / 2, 44);
+  if (p.msg) { ctx.fillStyle = '#f4d03f'; ctx.font = 'bold 16px monospace'; ctx.fillText(p.msg, W / 2, 120); }
+  if (p.state === 'over') {
+    ctx.fillStyle = 'rgba(6,8,18,0.6)'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = p.won ? '#7cb342' : '#e0392f'; ctx.font = 'bold 22px monospace';
+    ctx.fillText(p.won ? 'YOU WIN!' : 'YOU LOSE', W / 2, H / 2 - 12);
+    ctx.fillStyle = '#f4d03f'; ctx.font = 'bold 14px monospace'; ctx.fillText(p.reward, W / 2, H / 2 + 12);
+  }
+  ctx.textAlign = 'left';
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -2819,6 +3036,12 @@ window.BS = {
   costumes: () => Game.owned.costumes,
   costumeIdx: () => Game.hero.costumeIdx,
   equipCostume: (id) => { Game.hero.costumeIdx = id; Save.save(); },
+  // The Challenger / pickleball
+  challenger: () => Game.levelData && Game.levelData.challenger,
+  startPickle, setupPickle, endPickle, resumePickle,
+  pickle: () => Game.pickle,
+  pickleWins: () => Game.pickleWins,
+  transition: () => Game.transition,
   pause: togglePause,
   isPaused: () => Game.paused,
   buildSwatches,
