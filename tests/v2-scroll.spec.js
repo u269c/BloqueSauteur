@@ -255,6 +255,27 @@ test.describe('v1.7 · hazards (22 types)', () => {
     expect(r.l1).toBe(0);              // L1 stays hazard-free
   });
 
+  test('hazards are bound to their world theme (no cross-world kinds)', async ({ page }) => {
+    const r = await page.evaluate(() => {
+      const byWorld = window.BS.HAZARDS_BY_WORLD;
+      const offenders = [];
+      for (const world of Object.keys(byWorld)) {
+        const pool = new Set(byWorld[world]);
+        for (let lv = 2; lv <= 5; lv++) for (let s = 0; s < 30; s++) {
+          for (const h of window.BS.genLevel(lv, s, world).hazards || []) if (!pool.has(h.kind)) offenders.push(world + ':' + h.kind);
+        }
+      }
+      // neg. control: the full 22-kind list contains kinds NOT in the classic world's set
+      const cls = new Set(byWorld.classic);
+      const leaks = window.BS.HAZARD_KINDS.filter((k) => !cls.has(k)).length;
+      return { count: offenders.length, sample: offenders.slice(0, 5), leaks, worlds: Object.keys(byWorld).length };
+    });
+    expect(r.count).toBe(0);                 // every placed hazard belongs to its world's set
+    expect(r.sample).toEqual([]);
+    expect(r.worlds).toBe(10);
+    expect(r.leaks).toBeGreaterThan(0);      // neg. control: not all kinds fit one world
+  });
+
   test('a hazard hurts the hero; ghost/dodge passes through (neg. control)', async ({ page }) => {
     const hp = (ghost) => page.evaluate((ghost) => {
       window.BS.start(); window.BS.reseed(1); window.BS.setLevel(4); window.BS.setMode('normal');
