@@ -142,12 +142,17 @@
   .shop-tab { padding:1vmin 2.4vmin; font-size:min(3.2vmin,14px); font-weight:700; letter-spacing:.04em; color:#7a6a48; background:#efe4c8; border:2px solid #cdbfa0; border-radius:9px 9px 0 0; cursor:pointer; }
   .shop-tab.sel { color:#2a2320; background:#fffaf0; border-color:#2a2320; border-bottom-color:#fffaf0; }
   .shop-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:2vmin; max-height:52vh; overflow-y:auto; padding-right:1vmin; }
-  .shop-grid.wide { grid-template-columns:repeat(4,1fr); }   /* costumes: 3×4 table */
+  /* costumes: a wide, compact table — every costume visible at once, no scrolling */
+  .shop-grid.wide { grid-template-columns:repeat(7,1fr); gap:1.1vmin; max-height:none; overflow:visible; padding-right:0; }
   .shop-item { background:#fffaf0; border:2px solid #cdbfa0; border-radius:12px; padding:1.6vmin 1vmin; text-align:center; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:.6vmin; }
   .shop-item:hover:not(.disabled) { border-color:#2e6b3a; background:#f2fbef; }
   .shop-item canvas { image-rendering:pixelated; width:min(11vmin,52px); height:min(11vmin,52px); }
   .shop-item .it-name { font-weight:700; font-size:min(3.1vmin,13px); line-height:1.1; }
   .shop-item .it-price { font-weight:800; font-size:min(3.4vmin,15px); color:#b58900; }
+  .shop-grid.wide .shop-item { padding:.9vmin .5vmin; gap:.3vmin; border-radius:9px; }
+  .shop-grid.wide .shop-item canvas { width:min(7.2vmin,40px); height:min(7.2vmin,40px); }
+  .shop-grid.wide .shop-item .it-name { font-size:min(2.2vmin,10px); }
+  .shop-grid.wide .shop-item .it-price { font-size:min(2.5vmin,11px); }
   .shop-item.owned { opacity:.55; cursor:default; }
   .shop-item.owned .it-price { color:#2e6b3a; }
   .shop-item.poor { opacity:.5; cursor:default; }
@@ -3273,7 +3278,7 @@ function drawLowHpVignette() {
   const W = CONFIG.W, H = CONFIG.H, pulse = 0.5 + 0.5 * Math.sin(Game.t * 5);
   const g = ctx.createRadialGradient(W / 2, H / 2, H * 0.32, W / 2, H / 2, H * 0.78);
   g.addColorStop(0, 'rgba(190,0,0,0)');
-  g.addColorStop(1, `rgba(170,0,0,${0.32 + 0.28 * pulse})`);
+  g.addColorStop(1, `rgba(170,0,0,${0.192 + 0.168 * pulse})`);   // 40% softer than before
   ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
 }
 // Post-process ripple for the poison-mushroom wobble: snapshot the frame, then re-blit it
