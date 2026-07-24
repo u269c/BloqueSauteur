@@ -281,12 +281,14 @@ const LAST_LEVEL = 5;
 // Hole counts are tuned so total level WIDTH is ~5x the original draft (the fixed
 // entrance/exit pads don't scale, so this isn't a plain 5x of the hole count).
 // Enemies are 7x the original per-level count, distributed along the run.
+// chunks = number of hole+ground segments (levels are ~half their old length).
+// enemies = ~1.3x the old counts (denser — lots on screen at once).
 const TRAVERSE = {
-  1: { holes: 35, floats: 30, enemies: 21, chests: 2 },
-  2: { holes: 46, floats: 40, enemies: 35, chests: 2 },
-  3: { holes: 60, floats: 51, enemies: 49, chests: 3 },
-  4: { holes: 76, floats: 65, enemies: 63, chests: 3 },
-  5: { holes: 90, floats: 77, enemies: 84, chests: 4 },
+  1: { chunks: 18, enemies: 27,  chests: 2 },
+  2: { chunks: 14, enemies: 46,  chests: 2 },   // L2 = sky-climb finale into a boss void
+  3: { chunks: 19, enemies: 64,  chests: 3 },
+  4: { chunks: 26, enemies: 82,  chests: 3 },
+  5: { chunks: 27, enemies: 109, chests: 4 },
 };
 // Treasure-chest loot: stomp a chest to pop a mushroom. ~25% of chests are "bad".
 const GOOD_SHROOMS = ['highjump', 'teleport', 'heal', 'money'];
@@ -615,48 +617,68 @@ function genTerrain(level, seed) {
   return { level, seed: seed >>> 0, arena: true, cols: h, segments, baseTop, x0, x1, colW: T, nCols };
 }
 
-// v2.0 traversal level: a long left→right strip of solid GROUND segments (gaps between
-// them = holes; a fall = death) plus one-way jump-up FLOAT platforms. Reaching exitX
-// starts the boss arena. Enemies are pre-placed along the ground (activated in Phase C).
+// v2.0 traversal level: a left→right strip of solid GROUND segments (gaps = holes; a fall
+// = death) plus one-way jump-through FLOAT platforms. Small gaps get a single jump-up
+// float; "large" gaps get a multi-tier float staircase (up then down) you must climb to
+// avoid a very wide hole. Reaching the exit → boss arena. L2 ends with a sky-climb into a
+// boss void. Enemies + chests are placed along the ground.
+const TIER = 26;   // vertical step between float tiers (comfortably jumpable)
 function genLevel(level, seed) {
   const C = CONFIG, T = C.TILE, top = C.PLAT_Y;
   const rand = mulberry32(((seed >>> 0) ^ Math.imul((level | 0) + 101, 0x9E3779B1)) >>> 0);
   const p = TRAVERSE[level] || TRAVERSE[1];
   const roster = (LEVELS[level] || LEVELS[1]).types;
-  const ground = [], floats = [], enemies = [];
+  const ground = [], floats = [], enemies = [], chests = [];
   let x = 0;
-  const ENTRANCE = Math.round(C.W * 0.6);                  // safe run-up: no holes near the start
+  const ENTRANCE = Math.round(C.W * 0.55);                 // safe run-up: no holes near the start
   ground.push({ x0: 0, x1: ENTRANCE, top }); x = ENTRANCE;
-  for (let i = 0; i < p.holes; i++) {
-    const hw = (2 + Math.floor(rand() * 2)) * T;           // 2-3 tile hole (≤ MAX_JUMP_GAP)
-    if (i < p.floats) {                                    // a "1 level up" jump-through platform over the gap
-      const fw = (2 + Math.floor(rand() * 2)) * T;
-      floats.push({ x: x + Math.round((hw - fw) / 2), y: top - 2 * T, w: fw });
+  const bigProb = Math.min(0.6, 0.15 + level * 0.08);      // higher levels lean on staircases
+  const maxTier = Math.min(4, 1 + Math.floor(level / 1.5));
+  for (let i = 0; i < p.chunks; i++) {
+    if (rand() < bigProb && maxTier >= 2) {
+      // large hole crossed by a float staircase (ascend to a peak tier, then descend)
+      const peak = 2 + Math.floor(rand() * (maxTier - 1)), steps = peak * 2 + 1, stepW = 30 + Math.floor(rand() * 8), fw = 24;
+      for (let s = 0; s < steps; s++) { const tier = peak - Math.abs(peak - s); floats.push({ x: Math.round(x + 6 + s * stepW), y: top - tier * TIER, w: fw }); }
+      x += 12 + steps * stepW;
+    } else {
+      // small jumpable hole; usually with a single jump-up float over it
+      const hw = (2 + Math.floor(rand() * 2)) * T;
+      if (rand() < 0.6) floats.push({ x: Math.round(x + hw / 2 - 12), y: top - (1 + Math.floor(rand() * 2)) * TIER, w: 24 });
+      x += hw;
     }
-    x += hw;
-    const gw = (4 + Math.floor(rand() * 5)) * T;           // 4-8 tile ground run
+    const gw = (4 + Math.floor(rand() * 4)) * T;
     ground.push({ x0: x, x1: x + gw, top }); x += gw;
   }
-  const EXIT = Math.round(C.W * 0.5);
-  const exitX = x + 2 * T;
-  ground.push({ x0: x, x1: x + EXIT, top }); x += EXIT;    // solid exit pad → boss arena
-  // Distribute the enemies across the interior ground runs (skip the entrance + exit pads),
-  // several per run when the count is high — so all `p.enemies` fit on a long level.
-  const mid = ground.slice(1, -1).length ? ground.slice(1, -1) : ground;
+  // ── exit ──
+  let exitX, bossPit = null, bossSign = null;
+  if (level === 2) {
+    // Sky-climb finale: floats ascending high (no ground below → the floor drops away),
+    // then a boss VOID to drop into (marked by a neon BOSS sign + flashing arrow).
+    const peak = 5, stepW = 34, fw = 24;
+    for (let s = 1; s <= peak; s++) floats.push({ x: Math.round(x + s * stepW), y: top - s * TIER, w: fw });
+    const apexX = x + peak * stepW;
+    floats.push({ x: apexX + stepW, y: top - peak * TIER, w: fw });   // a landing ledge at the top
+    exitX = apexX;                                                    // progress bar fills to the climb top
+    bossPit = { x0: apexX - 30, x1: apexX + 160 };                   // drop here → boss (not death)
+    bossSign = { x: apexX + 70, y: top - 4 };
+    x = apexX + 200;
+  } else {
+    exitX = x + 2 * T;
+    ground.push({ x0: x, x1: x + Math.round(C.W * 0.5), top }); x += Math.round(C.W * 0.5);
+  }
+  // enemies + chests across the interior ground runs
+  const mid = ground.slice(1).length ? ground.slice(1) : ground;
   for (let i = 0; i < p.enemies; i++) {
     const g = mid[i % mid.length], span = Math.max(1, (g.x1 - g.x0) - 12);
     enemies.push({ x: Math.round(g.x0 + 6 + rand() * span), type: roster[Math.floor(rand() * roster.length)] });
   }
-  // Treasure chests — spread across interior grounds (spaced apart from the enemy pattern);
-  // ~25% roll a "bad" mushroom, the rest a good one.
-  const chests = [];
   for (let i = 0; i < (p.chests || 0); i++) {
     const g = mid[Math.floor((i + 0.5) * mid.length / (p.chests || 1)) % mid.length];
     const bad = rand() < 0.25;
     const type = bad ? BAD_SHROOMS[Math.floor(rand() * BAD_SHROOMS.length)] : GOOD_SHROOMS[Math.floor(rand() * GOOD_SHROOMS.length)];
     chests.push({ x: Math.round((g.x0 + g.x1) / 2), top: g.top, bad, type, opened: false });
   }
-  return { level, seed: seed >>> 0, traverse: true, ground, floats, enemies, chests, width: x, exitX, top, baseTop: top, x0: 0, x1: x, colW: T };
+  return { level, seed: seed >>> 0, traverse: true, ground, floats, enemies, chests, bossPit, bossSign, width: x, exitX, top, baseTop: top, x0: 0, x1: x, colW: T };
 }
 const genArena = genTerrain;   // the boss arena is the classic single-screen terrain
 // Ground top at world-x for a traversal level (floats excluded), or null over a hole.
@@ -1901,13 +1923,18 @@ function update(dt) {
   if (h.strong && h.onGround && wasAir) { strongHitBlast(); h.strong = false; }
   if (wasAir && h.onGround) Game.combo = 0;   // landing ends the combo chain
 
+  // boss VOID (L2): dropping into the marked pit past the sky-climb → the boss, not death
+  const lvl = Game.levelData;
+  if (Game.phase === 'traverse' && lvl && lvl.bossPit && !h.dead &&
+      h.x >= lvl.bossPit.x0 && h.x <= lvl.bossPit.x1 && h.y >= lvl.top + 8) { enterBossArena(); return; }
+
   // lava death — fell into a hole or off an edge and reached the lava surface
   if (h.y >= C.LAVA_Y) heroDie();
 
   // scroll the camera and, on reaching the exit, lock into the boss arena
   if (Game.phase === 'traverse') {
-    Game.cam.x = Math.max(0, Math.min(Game.levelData.width - C.W, Math.round(h.x - C.W * 0.4)));
-    if (!h.dead && h.x >= Game.levelData.exitX) { enterBossArena(); return; }
+    Game.cam.x = Math.max(0, Math.min(lvl.width - C.W, Math.round(h.x - C.W * 0.4)));
+    if (!lvl.bossPit && !h.dead && h.x >= lvl.exitX) { enterBossArena(); return; }   // horizontal exit (non-pit levels)
   }
 
   updatePickables(dt);
@@ -2158,6 +2185,18 @@ function drawTerrain() {
   const segs = ter.traverse ? ter.ground : ter.segments;
   for (const s of segs) { if (fn) fn(s, d); else segDefault(s, d); }
   if (ter.traverse) for (const f of ter.floats) drawFloat(f, d);
+  if (ter.traverse && ter.bossSign) drawBossSign(ter.bossSign);
+}
+// Neon "BOSS" sign + flashing down-arrow marking the L2 sky-climb void to drop into.
+function drawBossSign(sg) {
+  const flash = 0.5 + 0.5 * Math.sin(Game.t * 6);
+  ctx.save();
+  ctx.font = 'bold 13px monospace'; ctx.textAlign = 'center';
+  ctx.fillStyle = `rgba(255,64,64,${0.55 + 0.45 * flash})`; ctx.fillText('BOSS', sg.x, sg.y);
+  ctx.strokeStyle = `rgba(255,90,90,${0.35 + 0.6 * flash})`; ctx.lineWidth = 2;
+  const ax = sg.x, ay = sg.y + 8;
+  ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(ax, ay + 20); ctx.moveTo(ax - 6, ay + 12); ctx.lineTo(ax, ay + 20); ctx.lineTo(ax + 6, ay + 12); ctx.stroke();
+  ctx.textAlign = 'left'; ctx.restore();
 }
 // One-way jump-through platforms — chunky, themed to the world (open air below).
 const FLOAT_H = 12;

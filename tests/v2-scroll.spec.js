@@ -10,28 +10,28 @@ test.beforeEach(async ({ page }) => {
 });
 
 test.describe('v2.0 · traversal level shape', () => {
-  test('genLevel builds a solid left→right strip with jumpable holes + floats + exit', async ({ page }) => {
+  test('genLevel builds a solid strip with holes, multi-tier floats, enemies + exit', async ({ page }) => {
     const r = await page.evaluate(() => {
       const C = window.BS.CONFIG, lvl = window.BS.genLevel(3, 123);
-      // holes = gaps between consecutive ground segments
       const holes = [];
       for (let i = 0; i < lvl.ground.length - 1; i++) { const g = lvl.ground[i + 1].x0 - lvl.ground[i].x1; if (g > 0) holes.push(g); }
+      const tiers = new Set(lvl.floats.map((f) => Math.round((lvl.top - f.y) / 26)));
       return {
-        ground: lvl.ground.length, floats: lvl.floats.length, enemies: lvl.enemies.length,
         startSolid: lvl.ground[0].x0, width: lvl.width, exitX: lvl.exitX,
-        maxHole: Math.max(...holes), holeCount: holes.length, MAX: C.MAX_JUMP_GAP,
-        screens: +(lvl.width / C.W).toFixed(1),
+        floats: lvl.floats.length, enemies: lvl.enemies.length, holeCount: holes.length,
+        maxTier: Math.max(...tiers), screens: +(lvl.width / C.W).toFixed(1),
       };
     });
-    expect(r.startSolid).toBe(0);                   // solid ground at the very start
-    expect(r.exitX).toBeLessThan(r.width);          // exit sits before the far end
-    expect(r.floats).toBeGreaterThan(0);            // jump-up platforms exist
-    expect(r.enemies).toBeGreaterThan(0);           // enemies pre-placed
-    expect(r.maxHole).toBeLessThanOrEqual(r.MAX);   // every hole is jumpable
-    expect(r.screens).toBeGreaterThan(2);           // it's a real scroll (multiple screens)
+    expect(r.startSolid).toBe(0);              // solid ground at the very start
+    expect(r.exitX).toBeLessThan(r.width);
+    expect(r.floats).toBeGreaterThan(0);
+    expect(r.enemies).toBeGreaterThan(0);
+    expect(r.holeCount).toBeGreaterThan(0);
+    expect(r.maxTier).toBeGreaterThanOrEqual(2);   // multi-tier float staircases over large holes
+    expect(r.screens).toBeGreaterThan(2);
   });
 
-  test('later levels are longer / have more holes than early ones', async ({ page }) => {
+  test('later levels are longer than early ones', async ({ page }) => {
     const r = await page.evaluate(() => {
       const w = (n) => window.BS.genLevel(n, 7).width;
       return { w1: w(1), w5: w(5) };
@@ -83,7 +83,7 @@ test.describe('v2.0 · one-way (jump-through) floats', () => {
 test.describe('v2.0 · traverse → boss arena', () => {
   test('reaching the exit locks into the boss arena and spawns the boss (no timer)', async ({ page }) => {
     const r = await page.evaluate(() => {
-      window.BS.start(); window.BS.reseed(1); window.BS.setLevel(2);
+      window.BS.start(); window.BS.reseed(1); window.BS.setLevel(3);   // L3 uses the horizontal exit (L2 is a pit)
       const before = { phase: window.BS.phase(), boss: !!window.BS.boss() };
       const h = window.BS.hero();
       h.x = window.BS.levelData().exitX + 4; window.BS.stepFixed(1);   // step across the exit line
@@ -93,6 +93,20 @@ test.describe('v2.0 · traverse → boss arena', () => {
     expect(r.before.boss).toBe(false);        // neg. control: no boss while traversing
     expect(r.after.phase).toBe('boss');
     expect(r.after.boss).toBe(true);          // boss spawned on arrival, not on a 60s clock
+  });
+
+  test('L2 sky-climb ends in a boss VOID: dropping into the pit enters the arena', async ({ page }) => {
+    const r = await page.evaluate(() => {
+      window.BS.start(); window.BS.reseed(3); window.BS.setLevel(2);
+      const lvl = window.BS.levelData(), h = window.BS.hero();
+      const hasPit = !!lvl.bossPit, hasSign = !!lvl.bossSign;
+      Object.assign(h, { x: (lvl.bossPit.x0 + lvl.bossPit.x1) / 2, y: lvl.top + 20, vy: 30, onGround: false, dead: false });
+      window.BS.stepFixed(1);
+      return { hasPit, hasSign, phase: window.BS.phase() };
+    });
+    expect(r.hasPit).toBe(true);
+    expect(r.hasSign).toBe(true);     // neon BOSS sign marks the drop
+    expect(r.phase).toBe('boss');     // dropping into the void → boss arena (not death)
   });
 });
 
