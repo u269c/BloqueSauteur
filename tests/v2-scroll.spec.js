@@ -233,15 +233,15 @@ test.describe('v1.7 · climbing (ropes/ladders/vines/chains/poles)', () => {
   });
 });
 
-test.describe('v1.7 · hazards (12 types)', () => {
-  test('there are 12 hazard kinds across levels; none on L1', async ({ page }) => {
+test.describe('v1.7 · hazards (22 types)', () => {
+  test('there are 22 hazard kinds across levels; none on L1', async ({ page }) => {
     const r = await page.evaluate(() => {
       const kinds = new Set(); let l1 = 0;
-      for (let lv = 1; lv <= 5; lv++) for (let s = 0; s < 40; s++) { const hs = window.BS.genLevel(lv, s).hazards || []; if (lv === 1) l1 += hs.length; hs.forEach((h) => kinds.add(h.kind)); }
+      for (let lv = 1; lv <= 5; lv++) for (let s = 0; s < 120; s++) { const hs = window.BS.genLevel(lv, s).hazards || []; if (lv === 1) l1 += hs.length; hs.forEach((h) => kinds.add(h.kind)); }
       return { count: kinds.size, l1 };
     });
-    expect(r.count).toBeGreaterThanOrEqual(10);
-    expect(r.count).toBe(12);
+    expect(r.count).toBeGreaterThanOrEqual(20);
+    expect(r.count).toBe(22);
     expect(r.l1).toBe(0);              // L1 stays hazard-free
   });
 
