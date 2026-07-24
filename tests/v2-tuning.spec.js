@@ -143,3 +143,22 @@ test('stomping is forgiving: descending onto the upper portion / a bit off-centr
   expect(sideways.alive).toBe(true);      // enemy survives a side bump
   expect(sideways.hp).toBeLessThan(5);    // and the hero takes a hit
 });
+
+test('enemies push apart instead of overlapping', async ({ page }) => {
+  await openGame(page);
+  await page.evaluate(() => window.BS.freeze(true));
+  const r = await page.evaluate(() => {
+    window.BS.start(); window.BS.reseed(1); window.BS.setupArena(1);
+    const st = window.BS.state(); st.enemies.length = 0; st.hero.ghost = 1e9;
+    const C = window.BS.CONFIG;
+    window.BS.spawnEnemy('clear'); window.BS.spawnEnemy('clear');
+    const a = window.BS.enemies()[0], b = window.BS.enemies()[1];
+    Object.assign(a, { x: 238, y: C.PLAT_Y, vx: 0, vy: 0, onGround: true, patrol: true, dir: 1 });
+    Object.assign(b, { x: 242, y: C.PLAT_Y, vx: 0, vy: 0, onGround: true, patrol: true, dir: -1 });
+    const before = Math.abs(a.x - b.x);
+    for (let k = 0; k < 20; k++) window.BS.stepFixed(1);
+    return { before, after: Math.abs(a.x - b.x), r: a.r };
+  });
+  expect(r.before).toBeLessThan(2 * r.r);        // started overlapping
+  expect(r.after).toBeGreaterThanOrEqual(2 * r.r - 1);   // pushed apart to (roughly) non-overlap
+});

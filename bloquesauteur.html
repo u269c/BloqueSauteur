@@ -302,8 +302,8 @@ const TRAVERSE = {
   1: { chunks: 14, enemies: 27,  chests: 2 },
   2: { chunks: 11, enemies: 46,  chests: 2 },   // L2 = sky-climb finale into a boss void
   3: { chunks: 15, enemies: 64,  chests: 3 },
-  4: { chunks: 20, enemies: 82,  chests: 3 },
-  5: { chunks: 23, enemies: 109, chests: 4 },
+  4: { chunks: 20, enemies: 62,  chests: 3 },   // trimmed — they spread out now (no overlap)
+  5: { chunks: 23, enemies: 82,  chests: 4 },
 };
 // Treasure-chest loot: stomp a chest to pop a mushroom. ~25% of chests are "bad".
 const GOOD_SHROOMS = ['highjump', 'teleport', 'heal', 'money'];
@@ -1978,6 +1978,21 @@ function updateEnemies(dt) {
       else if (hr > el && hl < er && hbot > etop && htop < ebot) {   // side contact
         if (h.shieldT > 0) { e.alive = false; h.shieldT = 0; addKill(e.x, e.y - e.r, '#c9d0da', e.type === 'blue' ? 3 : 1); shake(4); }  // spiked shield kills the attacker
         else heroHurt(e.x > h.x);                     // hit → knock away from the enemy
+      }
+    }
+  }
+  // separation: enemies can't overlap — they bump and push apart (patrol ones reverse on a head-on)
+  const es = Game.enemies;
+  for (let i = 0; i < es.length; i++) {
+    const a = es[i]; if (!a.alive) continue;
+    for (let j = i + 1; j < es.length; j++) {
+      const b = es[j]; if (!b.alive) continue;
+      const dx = b.x - a.x, dy = b.y - a.y, minD = a.r + b.r;
+      if (Math.abs(dx) < minD && Math.abs(dy) < minD) {
+        const s = dx >= 0 ? 1 : -1, push = Math.max(0.5, (minD - Math.abs(dx)) / 2);
+        a.x -= s * push; b.x += s * push;
+        if (a.patrol && !a.leaping && a.dir === s) { a.dir = -a.dir; a.vx = a.dir * a.baseSpeed; }   // bounce off each other
+        if (b.patrol && !b.leaping && b.dir === -s) { b.dir = -b.dir; b.vx = b.dir * b.baseSpeed; }
       }
     }
   }
