@@ -649,11 +649,21 @@ function genTerrain(level, seed) {
 // boss void. Enemies + chests are placed along the ground.
 const TIER = 26;   // vertical step between float tiers (comfortably jumpable)
 const CLIMB_SPEED = 74, CLIMB_KINDS = ['rope', 'ladder', 'vine', 'chain', 'pole'];   // hold ↑/↓ to climb
-function genLevel(level, seed) {
+// The world this level will be themed as (mirrors reseed()'s seeded assignment). Used so
+// genLevel can pick world-appropriate hazards even when called directly (tests).
+function worldForLevel(level, seed) {
+  if (level === 5) return 'classic';   // the volcano finale is always classic (see buildLevel)
+  const trng = mulberry32((seed >>> 0) ^ 0x5bd1e995);
+  const worlds = shuffled(WORLD_KEYS, trng);
+  return worlds[(level - 1) % worlds.length];
+}
+function genLevel(level, seed, world) {
   const C = CONFIG, T = C.TILE, top = C.PLAT_Y;
   const rand = mulberry32(((seed >>> 0) ^ Math.imul((level | 0) + 101, 0x9E3779B1)) >>> 0);
   const p = TRAVERSE[level] || TRAVERSE[1];
   const roster = (LEVELS[level] || LEVELS[1]).types;
+  const hzPool = HAZARDS_BY_WORLD[world || worldForLevel(level, seed)] || HAZARD_KINDS;   // themed hazard set
+  const hzAir = hzPool.filter((k) => AIRBORNE_HAZARDS.has(k));                             // sky-gauntlet subset
   const ground = [], floats = [], enemies = [], chests = [], climbables = [], hazards = [];
   let x = 0;
   const ENTRANCE = Math.round(C.W * 0.55);                 // safe run-up: no holes near the start
@@ -674,7 +684,7 @@ function genLevel(level, seed) {
       const fx = Math.round(x + s * sw), fy = top - useTier * TIER;
       floats.push({ x: fx, y: fy, w: 26 });
       if (s > 0 && s < steps - 1 && rand() < 0.7) {         // a mid-air hazard to dodge between hops
-        const air = ['fireball', 'saw', 'boomerang', 'spore', 'bees', 'tornado'];
+        const air = hzAir.length ? hzAir : hzPool;
         hazards.push({ x: fx + Math.round(sw / 2), top: fy, kind: air[Math.floor(rand() * air.length)], ph: rand() * 3, range: 12 });
       }
       tier = Math.max(2, Math.min(4, tier + (rand() < 0.5 ? 1 : -1)));   // zig-zag ±1 tier (always jumpable, forces up/down)
@@ -753,7 +763,7 @@ function genLevel(level, seed) {
   const nHaz = level >= 2 ? level * 2 - 1 : 0;
   for (let i = 0; i < nHaz; i++) {
     const g = mid[Math.floor(rand() * mid.length)];
-    hazards.push({ x: Math.round(g.x0 + 10 + rand() * Math.max(1, (g.x1 - g.x0) - 20)), top: g.top, kind: HAZARD_KINDS[Math.floor(rand() * HAZARD_KINDS.length)], ph: rand() * 3, range: 16 + rand() * 18 });
+    hazards.push({ x: Math.round(g.x0 + 10 + rand() * Math.max(1, (g.x1 - g.x0) - 20)), top: g.top, kind: hzPool[Math.floor(rand() * hzPool.length)], ph: rand() * 3, range: 16 + rand() * 18 });
   }
   // The Challenger: a stationary adventurer on L4, ~1/3 through the level.
   let challenger = null;
@@ -916,10 +926,7 @@ function reseed(seed) {
 function buildLevel() {
   // A level begins in the scrolling TRAVERSE phase (the boss arena comes at the exit).
   Game.phase = 'traverse';
-  Game.levelData = genLevel(Game.level, Game.seed);
-  Game.terrain = Game.levelData;
-  Game.cam.x = 0;
-  // Assign this level's look (debug override: ?theme=world,sky).
+  // Assign this level's look first (debug override: ?theme=world,sky) so the terrain can theme its hazards.
   const o = Game.themeOrder || { worlds: WORLD_KEYS, skies: SKY_KEYS };
   const i = (Game.level - 1);
   let world = o.worlds[i % o.worlds.length], sky = o.skies[i % o.skies.length];
@@ -927,6 +934,9 @@ function buildLevel() {
   const q = new URLSearchParams(location.search).get('theme');
   if (q) { const [w, s] = q.split(','); if (WORLDS[w]) world = w; if (SKY_KEYS.includes(s)) sky = s; }
   Game.theme = { world, sky };
+  Game.levelData = genLevel(Game.level, Game.seed, world);
+  Game.terrain = Game.levelData;
+  Game.cam.x = 0;
   Game.hitThisLevel = false;
   Game.enemies = [];
   Game.pickups = [];
@@ -1899,6 +1909,21 @@ function updatePickables(dt) {
 // ── Hazards ───────────────────────────────────────────────────────
 const HAZARD_KINDS = ['spikes', 'saw', 'geyser', 'lightning', 'fireball', 'flamejet', 'fallrock', 'tornado', 'mace', 'acid', 'urchin', 'sparkcloud',
   'laser', 'slime', 'boomerang', 'spore', 'quicksand', 'icicle', 'bees', 'piston', 'windgust', 'bubble'];
+// Each world only spawns hazards that fit its theme. The union across worlds covers all 22 kinds.
+const HAZARDS_BY_WORLD = {
+  classic:    ['geyser', 'fireball', 'flamejet', 'fallrock', 'spikes', 'mace'],       // volcano tower
+  rooftops:   ['saw', 'laser', 'piston', 'mace', 'spikes', 'boomerang'],              // industrial city
+  poison:     ['spore', 'slime', 'acid', 'bubble', 'bees', 'quicksand'],              // toxic marsh
+  climbing:   ['fallrock', 'icicle', 'spikes', 'mace', 'windgust', 'boomerang'],      // rocky ascent
+  wineCorks:  ['bees', 'spore', 'slime', 'bubble', 'spikes', 'acid'],                 // vineyard
+  ropeBridge: ['bubble', 'spikes', 'saw', 'boomerang', 'windgust', 'piston'],         // croc river
+  skyClouds:  ['lightning', 'tornado', 'sparkcloud', 'windgust', 'bees', 'boomerang'],// cloudtop
+  mansion:    ['saw', 'spikes', 'mace', 'laser', 'piston', 'fallrock'],               // haunted mansion
+  bathtub:    ['bubble', 'slime', 'acid', 'spore', 'urchin', 'windgust'],             // bathtub
+  beach:      ['urchin', 'quicksand', 'bubble', 'spikes', 'bees', 'windgust'],        // beach
+};
+// Hazards that read as "in the air" — used for the sky-gauntlet float maze.
+const AIRBORNE_HAZARDS = new Set(['fireball', 'saw', 'boomerang', 'spore', 'bees', 'tornado', 'lightning', 'sparkcloud', 'laser', 'bubble', 'icicle', 'windgust']);
 // The (possibly moving/pulsing) damaging box of a hazard right now: {x0,y0,x1,y1,on}.
 function hazardBox(hz) {
   const tt = Game.t + hz.ph, x = hz.x, top = hz.top, R = hz.range || 22;
@@ -3382,7 +3407,7 @@ window.BS = {
   scene: () => Game.scene,
   seed: () => Game.seed,
   reseed,
-  genTerrain, genArena, genLevel, surfaceAt, findSafeX,
+  genTerrain, genArena, genLevel, worldForLevel, HAZARD_KINDS, HAZARDS_BY_WORLD, surfaceAt, findSafeX,
   terrain: () => Game.terrain,
   levelData: () => Game.levelData,
   phase: () => Game.phase,
