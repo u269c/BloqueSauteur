@@ -135,6 +135,14 @@
 
   /* Merchant shop */
   .shop-bubble { background:#faf3e0; color:#2a2320; border:3px solid #2a2320; border-radius:18px; padding:3vmin; max-width:min(92vw,520px); box-shadow:0 6px 0 rgba(0,0,0,0.3); }
+  /* comic-book speech bubble (the Challenger prompt): rounded white body + a pointer tail */
+  .speech-bubble { position:relative; background:#fffaf0; color:#1a1a1a; border:4px solid #1a1a1a; border-radius:28px; padding:3.4vmin 3.4vmin 3.8vmin; max-width:min(86vw,380px); box-shadow:0 8px 0 rgba(0,0,0,0.28); text-align:center; }
+  .speech-bubble p { color:#1a1a1a; font-weight:800; max-width:none; margin:0 0 2.2vmin; }
+  .speech-bubble::before { content:''; position:absolute; left:50%; bottom:-33px; transform:translateX(-50%) rotate(-6deg); border-left:17px solid transparent; border-right:17px solid transparent; border-top:33px solid #1a1a1a; }
+  .speech-bubble::after  { content:''; position:absolute; left:50%; bottom:-22px; transform:translateX(-50%) rotate(-6deg); border-left:11px solid transparent; border-right:11px solid transparent; border-top:23px solid #fffaf0; }
+  .speech-actions { display:flex; gap:2vmin; justify-content:center; flex-wrap:wrap; }
+  .speech-bubble .play-btn { margin-top:1.2vmin; padding:1.5vmin 3.6vmin; font-size:min(4.2vmin,18px); }
+  .speech-bubble .play-btn.ghost { color:#7a6f5c; border:2px solid rgba(0,0,0,0.28); padding:1.5vmin 3.4vmin; font-size:min(4vmin,17px); }
   .shop-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:1.6vmin; }
   .shop-title { font-weight:800; letter-spacing:.06em; color:#2e6b3a; font-size:min(4.6vmin,22px); }
   .shop-points { font-weight:700; color:#b58900; font-size:min(4vmin,18px); }
@@ -210,9 +218,9 @@
   </div>
 
   <div class="overlay hidden" id="challenge">
-    <div class="shop-bubble" style="max-width:min(88vw,420px)">
-      <p style="font-size:min(4.4vmin,20px); margin:0 0 2vmin;">🏓 “I challenge you to a PickleBall match!”</p>
-      <div style="display:flex; gap:2vmin; justify-content:center;">
+    <div class="speech-bubble">
+      <p style="font-size:min(4.4vmin,20px);">🏓 “I challenge you to a PickleBall match!”</p>
+      <div class="speech-actions">
         <button class="play-btn" id="challenge-yes">Oui!</button>
         <button class="play-btn ghost" id="challenge-no">No Thanks</button>
       </div>
