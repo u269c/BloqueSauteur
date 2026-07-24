@@ -60,3 +60,33 @@ test('the hero starts with 5 hearts', async ({ page }) => {
   expect(r.base).toBe(5);
   expect(r.hp).toBe(5);
 });
+
+test('high-jump mushroom lasts 5 jumps (counter decrements per jump)', async ({ page }) => {
+  await openGame(page);
+  await page.evaluate(() => window.BS.freeze(true));
+  const r = await page.evaluate(() => {
+    window.BS.start(); window.BS.reseed(1); window.BS.setupArena(1); window.BS.Input.reset();
+    const C = window.BS.CONFIG, h = window.BS.hero();
+    Object.assign(h, { x: 240, y: C.PLAT_Y, vx: 0, vy: 0, onGround: true, dead: false, ghost: 1e9 });
+    window.BS.applyMushroom('highjump');
+    const afterApply = h.bigJump;
+    window.BS.Input.press('jump', true); window.BS.stepFixed(1); window.BS.Input.press('jump', false);
+    return { afterApply, afterOneJump: h.bigJump };
+  });
+  expect(r.afterApply).toBe(5);        // charges 5 big jumps
+  expect(r.afterOneJump).toBe(4);      // one jump consumes one charge (not a one-shot)
+});
+
+test('boss-arena kills score no points (neg. control: traverse kills do)', async ({ page }) => {
+  await openGame(page);
+  await page.evaluate(() => window.BS.freeze(true));
+  const pts = async (phase) => page.evaluate((phase) => {
+    window.BS.start(); window.BS.reseed(1); window.BS.setLevel(3);
+    if (phase === 'boss') window.BS.enterArena();   // a real boss fight (bossActive)
+    const st = window.BS.state(); st.points = 0; window.BS.hero().onGround = true;
+    window.BS.addKill(100, 100, '#fff');
+    return st.points;
+  }, phase);
+  expect(await pts('boss')).toBe(0);      // no farming during the boss duel
+  expect(await pts('traverse')).toBe(1);  // neg. control: normal kills still score
+});
