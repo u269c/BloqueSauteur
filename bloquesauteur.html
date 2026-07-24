@@ -394,7 +394,7 @@ const COSTUMES = [
   { id: 17, name: 'Bandana',         price: 999 },   // earned by a 2nd pickleball win (not sold)
 ];
 const costumeKey = (id) => 'costume:' + id;
-const MERCHANT = { landY: CONFIG.PLAT_Y, descendV: 42, riseV: 260, hoverAmp: 22 };
+const MERCHANT = { hoverY: CONFIG.PLAT_Y - 74, descendV: 46, riseV: 420, hoverAmp: 22 };   // hovers mid-air on a jetpack; blasts up fast on exit
 
 // ── MUSIC ────────────────────────────────────────────────────────
 // Two shapes: short one-shot JINGLES use a single `notes` line; the eight long
@@ -1367,6 +1367,10 @@ const Audio = {
       case 'buy':       this.blip(n('E5'), .06, 'square', .4, t0); this.blip(n('A5'), .1, 'square', .35, t0 + .06); break;
       case 'buzzThanks':this.blip(n('C5'), .07, 'square', .3, t0); this.blip(n('E5'), .07, 'square', .3, t0 + .08); this.blip(n('G5'), .1, 'square', .3, t0 + .16); break;
       case 'buzzGrumpy':this.blip(n('E3'), .18, 'sawtooth', .4, t0); this.blip(n('C3'), .26, 'sawtooth', .4, t0 + .1); break;
+      case 'jetpack':   // big loud blaster whoosh (low rumble + noisy rasp)
+        this.blip(n('C2'), .7, 'sawtooth', .55, t0); this.blip(n('C1'), .7, 'square', .5, t0 + .01);
+        for (let i = 0; i < 14; i++) this.blip(n('E2') * (1 + i * 0.12), .1, 'sawtooth', .3, t0 + i * .045);
+        break;
       case 'lifeUp':    this.blip(n('C5'), .09, 'square', .4, t0); this.blip(n('E5'), .09, 'square', .4, t0 + .09); this.blip(n('G5'), .09, 'square', .4, t0 + .18); this.blip(n('C6'), .22, 'square', .42, t0 + .27); break;
       // Boss scream: a descending detuned sawtooth screech (mid-pitched, not shrill).
       case 'scream':    for (let i = 0; i < 12; i++) { const f = n('A4') * Math.pow(0.94, i); this.blip(f, .28, 'sawtooth', .38, t0 + i * .16); this.blip(f * 1.02, .28, 'sawtooth', .28, t0 + i * .16); } break;   // ~2s screech
@@ -1427,7 +1431,7 @@ function gotoShop() {
   Game.merchant = {
     x: 40 + Math.random() * (CONFIG.W - 80), y: -34,
     landX: Math.max(60, Math.min(CONFIG.W - 60, Game.hero.x + 40)),
-    state: 'descend', bought: false, t0: 0,
+    state: 'descend', bought: false, blastT: 0,
   };
   Audio.playMusic('merchant');
 }
@@ -1436,15 +1440,20 @@ function updateMerchant(dt) {
   if (m.state === 'descend') {
     m.y += MERCHANT.descendV * dt;
     m.x += (m.landX - m.x) * Math.min(1, dt * 1.5) + Math.sin(Game.sceneT * 4) * MERCHANT.hoverAmp * dt;
-    if (m.y >= MERCHANT.landY - 4) { m.y = MERCHANT.landY - 4; m.state = 'shop'; Audio.sfx('buzz'); showOverlay('shop'); buildShop(); }
+    if (m.y >= MERCHANT.hoverY) { m.y = MERCHANT.hoverY; m.state = 'shop'; Audio.sfx('buzz'); showOverlay('shop'); buildShop(); }   // jetpack takes over — never lands
+  } else if (m.state === 'shop') {
+    m.y = MERCHANT.hoverY + Math.sin(Game.sceneT * 3) * 3;   // idle hover bob
   } else if (m.state === 'ascend') {
-    m.y -= MERCHANT.riseV * dt;
-    if (m.y < -40) { Game.merchant = null; afterShop(); }
+    m.blastT += dt;
+    m.y -= MERCHANT.riseV * dt;                              // jetpack blast — shoots straight up
+    shake(2);
+    if (m.y < -50) { Game.merchant = null; afterShop(); }
   }
 }
 function closeShop() {
   hideOverlay('shop');
-  const m = Game.merchant; if (m) m.state = 'ascend';
+  const m = Game.merchant; if (m) { m.state = 'ascend'; m.blastT = 0; }
+  Audio.sfx('jetpack');                                      // big, loud blasters
   Audio.sfx(m && m.bought ? 'buzzThanks' : 'buzzGrumpy');
 }
 function afterShop() {
@@ -2942,12 +2951,26 @@ function drawPickup(pk) {
 function drawMerchant() {
   const m = Game.merchant; if (!m) return;
   const x = Math.round(m.x), y = Math.round(m.y);
-  // red parachute canopy + strings (shown while airborne)
-  if (m.state !== 'shop') {
+  // red parachute canopy + strings (only while descending)
+  if (m.state === 'descend') {
     ctx.strokeStyle = '#111'; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(x - 5, y - 8); ctx.lineTo(x - 12, y - 26); ctx.moveTo(x + 5, y - 8); ctx.lineTo(x + 12, y - 26); ctx.stroke();
     ctx.fillStyle = '#c31432'; ctx.beginPath(); ctx.moveTo(x - 16, y - 26); ctx.quadraticCurveTo(x, y - 44, x + 16, y - 26); ctx.closePath(); ctx.fill();
     ctx.fillStyle = '#8a0f24'; ctx.fillRect(x - 16, y - 27, 32, 2);
+  }
+  // jetpack pack + exhaust flames (while hovering, and a BIG twin blast on exit)
+  if (m.state === 'shop' || m.state === 'ascend') {
+    const big = m.state === 'ascend';
+    ctx.fillStyle = '#3a3f48'; ctx.fillRect(x - 11, y - 7, 5, 13); ctx.fillRect(x + 6, y - 7, 5, 13);   // twin thruster packs
+    ctx.fillStyle = '#5a626e'; ctx.fillRect(x - 11, y - 7, 5, 2); ctx.fillRect(x + 6, y - 7, 5, 2);
+    for (const nx of [x - 8, x + 8]) {
+      const fl = big ? (22 + Math.random() * 18) : (5 + Math.random() * 4);
+      const grd = ctx.createLinearGradient(0, y + 6, 0, y + 6 + fl);
+      grd.addColorStop(0, '#ffffff'); grd.addColorStop(0.35, '#ffca6b'); grd.addColorStop(1, 'rgba(224,57,47,0)');
+      ctx.fillStyle = grd;
+      ctx.beginPath(); ctx.moveTo(nx - (big ? 4 : 2), y + 6); ctx.lineTo(nx + (big ? 4 : 2), y + 6); ctx.lineTo(nx + (Math.random() * 3 - 1.5), y + 6 + fl); ctx.closePath(); ctx.fill();
+    }
+    if (big) { ctx.fillStyle = 'rgba(210,210,215,0.35)'; for (let i = 0; i < 5; i++) ctx.fillRect(x - 16 + Math.random() * 32, y + 12 + i * 7, 5, 5); }   // smoke puffs
   }
   // green blocky body (eye + orange/red accents + little legs) — per IMG_0052
   ctx.fillStyle = '#0a0a0a'; ctx.fillRect(x - 3, y + 6, 3, 4); ctx.fillRect(x + 1, y + 6, 3, 4);   // legs
