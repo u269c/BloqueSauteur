@@ -45,8 +45,10 @@ test('a match runs (ball rallies) and always ends within the point cap', async (
     for (let k = 0; k < 60 * 60; k++) {   // up to 60s
       const p = window.BS.pickle(); if (!p) break;
       window.BS.Input.left = window.BS.Input.right = false;
-      if (p.ball.x < 240) { if (p.ball.x > p.hero.x + 2) window.BS.Input.right = true; else if (p.ball.x < p.hero.x - 2) window.BS.Input.left = true; }
+      if (p.state === 'toss') window.BS.Input.press('jump', true);   // tap jump to serve (edge-triggered)
+      else if (p.ball.x < 240) { if (p.ball.x > p.hero.x + 2) window.BS.Input.right = true; else if (p.ball.x < p.hero.x - 2) window.BS.Input.left = true; }
       window.BS.step(1 / 60);
+      window.BS.Input.press('jump', false);                          // release so the next toss re-taps
       if (p.ball.x !== bx0) moved = true;
       if (p.state === 'over') { ended = true; break; }
     }
@@ -56,6 +58,33 @@ test('a match runs (ball rallies) and always ends within the point cap', async (
   expect(r.moved).toBe(true);    // the ball actually rallies
   expect(r.ended).toBe(true);    // the match terminates (win-by-2 with a hard cap)
   expect(r.max).toBeLessThanOrEqual(7);
+});
+
+test('the player serves by pressing jump, and the serve clears the net (no instant fault)', async ({ page }) => {
+  const r = await page.evaluate(() => {
+    window.BS.start(); window.BS.reseed(1); window.BS.setLevel(4); window.BS.setupPickle();
+    const p = window.BS.pickle();
+    let guard = 0; while (p.state !== 'toss' && guard++ < 400) window.BS.step(1 / 60);   // hero serves first → waits on the toss
+    const waiting = { state: p.state, held: p.ball.vx === 0 && p.ball.vy === 0, scoreA: p.scoreA };
+    for (let k = 0; k < 180; k++) window.BS.step(1 / 60);                                 // never serving → must NOT fault on its own
+    const stillWaiting = p.state === 'toss' && p.scoreA === waiting.scoreA;
+    window.BS.Input.press('jump', true); window.BS.step(1 / 60); window.BS.Input.press('jump', false);
+    const served = p.state === 'rally';
+    let crossed = false, faultBeforeCross = false;
+    for (let k = 0; k < 180; k++) {
+      const q = window.BS.pickle(); if (!q) break;
+      if (q.ball.x > 246) crossed = true;
+      if (q.state !== 'rally') { if (!crossed) faultBeforeCross = true; break; }
+      window.BS.step(1 / 60);
+    }
+    return { waiting, stillWaiting, served, crossed, faultBeforeCross };
+  });
+  expect(r.waiting.state).toBe('toss');    // it waits for the player to serve
+  expect(r.waiting.held).toBe(true);       // the ball is held (not auto-launched)
+  expect(r.stillWaiting).toBe(true);       // …and never faults by itself while waiting
+  expect(r.served).toBe(true);             // JUMP strikes the serve → rally
+  expect(r.crossed).toBe(true);            // the serve clears the net onto the opponent's side
+  expect(r.faultBeforeCross).toBe(false);  // neg. control: it did NOT fault at the net first (the old bug)
 });
 
 test('rewards escalate: win1 → paddle, win2 → bandana, win3+ → +50; a loss → −25', async ({ page }) => {
