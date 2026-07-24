@@ -2898,15 +2898,50 @@ function drawChallenger(ch) {
   }
 }
 // The whole pickleball minigame scene (own court; camera not used).
+const PB_CROWD = ['#e0392f', '#f4d03f', '#39a0ed', '#7cb342', '#e0348b', '#e8731e', '#eee8d5', '#b58ce0'];
+const pbHash = (a, b) => { const s = Math.sin(a * 12.9898 + b * 4.1414) * 43758.5453; return s - Math.floor(s); };
+// A fancy sports-hall backdrop: raked crowd stands, spotlights + beams, bunting, a jumbotron.
+function drawPickleHall() {
+  const W = CONFIG.W, t = Game.t, cy = PB.courtY;
+  const g = ctx.createLinearGradient(0, 0, 0, cy); g.addColorStop(0, '#171d38'); g.addColorStop(1, '#3a4670');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, cy);
+  // raked crowd stands with shimmering spectators
+  const standTop = 42, standBot = 150;
+  ctx.fillStyle = '#262b46'; ctx.fillRect(0, standTop, W, standBot - standTop);
+  for (let row = 0; row < 8; row++) {
+    const ry = standTop + row * (standBot - standTop) / 8;
+    ctx.fillStyle = 'rgba(0,0,0,0.2)'; ctx.fillRect(0, ry + 4, W, 1);
+    for (let cx = 3; cx < W; cx += 7) {
+      const hv = pbHash(cx, row * 3);
+      ctx.globalAlpha = 0.65 + 0.35 * Math.sin(t * 3 + hv * 30);
+      ctx.fillStyle = PB_CROWD[(hv * PB_CROWD.length) | 0];
+      ctx.fillRect(cx + ((hv * 2) | 0), ry + 1, 3, 3);
+    }
+  }
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#454f78'; ctx.fillRect(0, standBot, W, 7); ctx.fillStyle = '#5a659a'; ctx.fillRect(0, standBot, W, 1);   // barrier
+  // ceiling + trusses
+  ctx.fillStyle = '#10152a'; ctx.fillRect(0, 0, W, 12);
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1;
+  for (let x = 0; x < W; x += 24) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x + 12, 12); ctx.stroke(); }
+  // spotlights + soft beams
+  for (let i = 0; i < 4; i++) {
+    const sx = 70 + i * 116;
+    ctx.fillStyle = '#fff7cc'; ctx.fillRect(sx - 3, 9, 6, 3);
+    const bg = ctx.createLinearGradient(sx, 12, sx, standBot); bg.addColorStop(0, 'rgba(255,247,204,0.16)'); bg.addColorStop(1, 'rgba(255,247,204,0)');
+    ctx.fillStyle = bg; ctx.beginPath(); ctx.moveTo(sx - 2, 12); ctx.lineTo(sx + 2, 12); ctx.lineTo(sx + 20, standBot); ctx.lineTo(sx - 20, standBot); ctx.closePath(); ctx.fill();
+  }
+  // bunting pennants under the ceiling
+  for (let i = 0; i < W / 16; i++) { ctx.fillStyle = PB_CROWD[i % 4]; const bx = i * 16; ctx.beginPath(); ctx.moveTo(bx, 13); ctx.lineTo(bx + 16, 13); ctx.lineTo(bx + 8, 21); ctx.closePath(); ctx.fill(); }
+  // central jumbotron (frames the score, drawn on top later)
+  ctx.fillStyle = '#0c1024'; ctx.fillRect(W / 2 - 60, 16, 120, 40);
+  ctx.strokeStyle = '#5a659a'; ctx.lineWidth = 1; ctx.strokeRect(W / 2 - 60, 16, 120, 40);
+  ctx.fillStyle = '#c9d0da'; ctx.font = '6px monospace'; ctx.textAlign = 'center'; ctx.fillText('★ CHAMPIONSHIP ★', W / 2, 23); ctx.textAlign = 'left';
+}
 function drawPickle() {
   const p = Game.pickle, W = CONFIG.W, H = CONFIG.H;
-  // hall background (a big sports hall; faint courts with matches in the distance)
-  ctx.fillStyle = '#2b3550'; ctx.fillRect(0, 0, W, H);
-  ctx.fillStyle = '#37415f'; ctx.fillRect(0, 0, W, 72);
+  drawPickleHall();
   if (!p) return;
-  ctx.fillStyle = 'rgba(255,255,255,0.06)'; for (let i = 0; i < 3; i++) ctx.fillRect(28 + i * 150, 58, 112, 36);
-  ctx.fillStyle = 'rgba(255,255,255,0.5)'; for (let i = 0; i < 3; i++) ctx.fillRect(28 + i * 150 + 55, 58, 1, 36);   // distant nets
-  ctx.fillStyle = '#f4e04a'; for (let i = 0; i < 3; i++) ctx.fillRect(40 + i * 150 + ((Game.t * 30 + i * 40) % 90), 72 + (i % 2) * 8, 2, 2);   // faraway balls
   ctx.fillStyle = '#e0d0a0'; ctx.fillRect(0, PB.courtY, W, H - PB.courtY);   // court floor
   ctx.fillStyle = '#c7b482'; ctx.fillRect(0, PB.courtY, W, 2);
   ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(0, PB.courtY + 14); ctx.lineTo(W, PB.courtY + 14); ctx.stroke();
