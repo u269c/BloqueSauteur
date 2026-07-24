@@ -200,11 +200,11 @@ test.describe('v1.7 · level tuning (bigger, fewer holes, raised grounds)', () =
 });
 
 test.describe('v1.7 · climbing (ropes/ladders/vines/chains/poles)', () => {
-  test('climbables appear only on L3+, all five kinds exist; hold ↑ climbs to the top', async ({ page }) => {
+  test('climbables: L1 none, all five kinds exist across L3+; hold ↑ climbs to the top', async ({ page }) => {
     const r = await page.evaluate(() => {
       window.BS.freeze(true);
-      const kinds = new Set(); let early = 0;
-      for (let lv = 1; lv <= 5; lv++) for (let s = 0; s < 40; s++) { const cs = window.BS.genLevel(lv, s).climbables || []; if (lv < 3) early += cs.length; cs.forEach((c) => kinds.add(c.kind)); }
+      const kinds = new Set(); let l1 = 0;
+      for (let lv = 1; lv <= 5; lv++) for (let s = 0; s < 40; s++) { const cs = window.BS.genLevel(lv, s).climbables || []; if (lv === 1) l1 += cs.length; cs.forEach((c) => kinds.add(c.kind)); }
       window.BS.start(); window.BS.reseed(3); window.BS.setLevel(3);
       const c = window.BS.climbables()[0], h = window.BS.hero(); h.ghost = 1e9;
       Object.assign(h, { x: c.x, y: c.bot, vx: 0, vy: 0, onGround: true, dead: false });
@@ -212,11 +212,21 @@ test.describe('v1.7 · climbing (ropes/ladders/vines/chains/poles)', () => {
       let reachedTop = false;
       for (let k = 0; k < 500; k++) { window.BS.stepFixed(1); if (Math.abs(h.y - c.top) < 2) reachedTop = true; }
       window.BS.Input.reset();
-      return { kinds: [...kinds].sort(), early, reachedTop, endY: Math.round(h.y), top: c.top };
+      return { kinds: [...kinds].sort(), l1, reachedTop };
     });
     expect(r.kinds).toEqual(['chain', 'ladder', 'pole', 'rope', 'vine']);
-    expect(r.early).toBe(0);          // none on levels 1-2
+    expect(r.l1).toBe(0);             // none on level 1 (L2 gets gauntlet ropes)
     expect(r.reachedTop).toBe(true);  // climbed all the way up
+  });
+
+  test('every level 2+ has a sky-gauntlet (rope up + float maze + rope down)', async ({ page }) => {
+    const r = await page.evaluate(() => {
+      const gaunt = (lv) => { let min = 99; for (let s = 0; s < 20; s++) min = Math.min(min, window.BS.genLevel(lv, s).climbables.filter((c) => c.kind === 'rope').length); return min; };
+      return { l1: window.BS.genLevel(1, 1).climbables.filter((c) => c.kind === 'rope').length, l2: gaunt(2), l5: gaunt(5) };
+    });
+    expect(r.l1).toBe(0);              // no gauntlet on L1
+    expect(r.l2).toBeGreaterThanOrEqual(2);   // ≥1 gauntlet = ≥2 ropes (up + down), every seed
+    expect(r.l5).toBeGreaterThanOrEqual(2);
   });
 
   test('a climbable is ignored without an up/down press (neg. control)', async ({ page }) => {
