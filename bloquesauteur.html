@@ -138,6 +138,9 @@
   .shop-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:1.6vmin; }
   .shop-title { font-weight:800; letter-spacing:.06em; color:#2e6b3a; font-size:min(4.6vmin,22px); }
   .shop-points { font-weight:700; color:#b58900; font-size:min(4vmin,18px); }
+  .shop-tabs { display:flex; gap:1vmin; justify-content:center; margin-bottom:1.6vmin; }
+  .shop-tab { padding:1vmin 2.4vmin; font-size:min(3.2vmin,14px); font-weight:700; letter-spacing:.04em; color:#7a6a48; background:#efe4c8; border:2px solid #cdbfa0; border-radius:9px 9px 0 0; cursor:pointer; }
+  .shop-tab.sel { color:#2a2320; background:#fffaf0; border-color:#2a2320; border-bottom-color:#fffaf0; }
   .shop-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:2vmin; max-height:52vh; overflow-y:auto; padding-right:1vmin; }
   .shop-item { background:#fffaf0; border:2px solid #cdbfa0; border-radius:12px; padding:1.6vmin 1vmin; text-align:center; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:.6vmin; }
   .shop-item:hover:not(.disabled) { border-color:#2e6b3a; background:#f2fbef; }
@@ -194,6 +197,7 @@
   <div class="overlay hidden" id="shop">
     <div class="shop-bubble">
       <div class="shop-head"><span class="shop-title">✦ MERCHANT ✦</span><span class="shop-points" id="shop-points">0 pts</span></div>
+      <div class="shop-tabs" id="shop-tabs"></div>
       <div class="shop-grid" id="shop-grid"></div>
       <button class="play-btn" id="shop-leave">LEAVE</button>
     </div>
@@ -359,13 +363,15 @@ function shuffled(arr, rng) {
 // ── Merchant shop: 6 items (2×3), each purchasable once per slot. ──
 // persistent items (kept per slot across games) vs per-run consumables (hearts).
 const SHOP_ITEMS = [
-  { key: 'shield',     name: 'Spiked Shield', price: 100, blurb: 'DOWN (on the ground) arms a shield; kills the next attacker (10s cooldown)' },
-  { key: 'doubleJump', name: 'Double Jump',   price: 125, blurb: 'Jump again in mid-air' },
-  { key: 'dodge',      name: 'Dodge',         price: 125, blurb: 'LEFT+RIGHT: spin untouchable (hold up to 5s)' },
-  { key: 'strongHit',  name: 'Strong Hit',    price: 130, blurb: 'DOWN in the air = a hard dive: double boss damage, and a floor blast that clears nearby monsters' },
-  { key: 'halfHeart',  name: 'Half Heart',    price: 40,  blurb: '+½ max heart (this game)' },
-  { key: 'heart',      name: 'A Heart',       price: 75,  blurb: '+1 max heart (this game)' },
-  { key: 'twoHearts',  name: 'Two Hearts',    price: 110, blurb: '+2 max hearts (this game)' },
+  { key: 'shield',     name: 'Spiked Shield', price: 100, tab: 'skills',  blurb: 'DOWN (on the ground) arms a shield; kills the next attacker (10s cooldown)' },
+  { key: 'doubleJump', name: 'Double Jump',   price: 125, tab: 'skills',  blurb: 'Jump again in mid-air' },
+  { key: 'dodge',      name: 'Dodge',         price: 125, tab: 'skills',  blurb: 'LEFT+RIGHT: spin untouchable (hold up to 5s)' },
+  { key: 'strongHit',  name: 'Strong Hit',    price: 130, tab: 'skills',  blurb: 'DOWN in the air = a hard dive: double boss damage, and a floor blast that clears nearby monsters' },
+  { key: 'halfHeart',  name: 'Half Heart',    price: 40,  tab: 'healing', blurb: '+½ max heart (this game)' },
+  { key: 'heart',      name: 'A Heart',       price: 75,  tab: 'healing', blurb: '+1 max heart (this game)' },
+  { key: 'twoHearts',  name: 'Two Hearts',    price: 110, tab: 'healing', blurb: '+2 max hearts (this game)' },
+  { key: 'fullHeal',   name: 'Full Heal',     price: 60,  tab: 'healing', blurb: 'Instantly refill your hearts' },
+  { key: 'regen',      name: 'Regen Potion',  price: 90,  tab: 'healing', blurb: '+¼ heart every 5s during the next level' },
 ];
 // Which owned flags persist between games (purchases) vs reset each game (hearts).
 const PERSISTENT_ITEMS = ['shield', 'doubleJump', 'dodge', 'strongHit', 'paddle'];
@@ -391,6 +397,11 @@ const COSTUMES = [
   { id: 14, name: 'Switzerland Kit', price: 140 },
   { id: 15, name: 'Norway Kit',      price: 140 },
   { id: 16, name: 'Japan Kit',       price: 140 },
+  { id: 18, name: 'Brazil Kit',      price: 150 },
+  { id: 19, name: 'France Kit',      price: 150 },
+  { id: 20, name: 'Argentina Kit',   price: 150 },
+  { id: 21, name: 'Germany Kit',     price: 150 },
+  { id: 22, name: 'Mexico Kit',      price: 150 },
   { id: 17, name: 'Bandana',         price: 999 },   // earned by a 2nd pickleball win (not sold)
 ];
 const costumeKey = (id) => 'costume:' + id;
@@ -1186,6 +1197,17 @@ function drawShopIcon(c, key) {
       c.save(); c.beginPath(); c.rect(16, 6, 12, 20); c.clip(); heart(16, 15, 2, 'rgba(255,255,255,0.22)'); c.restore();
       break;
     case 'twoHearts': heart(11, 13, 1.6, '#e0392f'); heart(21, 18, 1.6, '#e0392f'); break;
+    case 'fullHeal':   // full red heart + a green "+" cross
+      heart(14, 15, 2, '#e0392f');
+      c.fillStyle = '#3ec26b'; c.fillRect(23, 7, 3, 11); c.fillRect(19, 11, 11, 3);
+      break;
+    case 'regen': {    // a green potion flask with bubbles
+      c.fillStyle = '#8a909b'; c.fillRect(14, 5, 4, 4);                      // cork
+      c.fillStyle = '#3ec26b'; c.beginPath(); c.moveTo(13, 9); c.lineTo(19, 9); c.lineTo(23, 26); c.lineTo(9, 26); c.closePath(); c.fill();
+      c.fillStyle = '#8fe0a8'; c.fillRect(12, 20, 8, 4);
+      c.fillStyle = '#eafff0'; c.fillRect(14, 15, 2, 2); c.fillRect(17, 19, 2, 2); c.fillRect(13, 22, 2, 2);
+      break;
+    }
   }
 }
 // A costume id if `key` is a costume key ('costume:N'), else null.
@@ -1193,7 +1215,7 @@ function costumeIdOf(key) { return (typeof key === 'string' && key.startsWith('c
 function itemOwned(key) { const cid = costumeIdOf(key); return cid != null ? Game.owned.costumes.includes(cid) : !!Game.owned[key]; }
 // The full shop catalogue: skills/hearts + every costume.
 function shopCatalogue() {
-  return SHOP_ITEMS.concat(COSTUMES.filter((c) => c.price < 900).map((c) => ({ key: costumeKey(c.id), name: c.name, price: c.price, blurb: 'Costume: ' + c.name })));   // price>=900 = earned only (Bandana)
+  return SHOP_ITEMS.concat(COSTUMES.filter((c) => c.price < 900).map((c) => ({ key: costumeKey(c.id), name: c.name, price: c.price, tab: 'costumes', blurb: 'Costume: ' + c.name })));   // price>=900 = earned only (Bandana)
 }
 function buyItem(key) {
   const item = shopCatalogue().find((i) => i.key === key); if (!item) return;
@@ -1201,6 +1223,8 @@ function buyItem(key) {
   Game.points -= item.price;
   const cid = costumeIdOf(key);
   if (cid != null) { Game.owned.costumes.push(cid); Game.hero.costumeIdx = cid; }   // auto-equip on buy
+  else if (key === 'fullHeal') { Game.hp = maxHearts(); }                           // consumable — rebuyable
+  else if (key === 'regen') { Game.regen = true; Game.regenT = 0; }                 // ticks +¼ heart/5s next level
   else {
     Game.owned[key] = true;
     // A bought heart raises the max AND heals by that same amount only (not a full refill).
@@ -1212,11 +1236,25 @@ function buyItem(key) {
   Audio.sfx('buy'); Save.save(); buildShop();
   if (cid != null) buildCostumes();
 }
+const SHOP_TABS = [['skills', 'SKILLS'], ['healing', 'HEALING'], ['costumes', 'COSTUMES']];
 function buildShop() {
   const grid = document.getElementById('shop-grid'); if (!grid) return;
   const pts = document.getElementById('shop-points'); if (pts) pts.textContent = Game.points + ' pts';
+  if (!Game.shopTab) Game.shopTab = 'skills';
+  // tab bar
+  const tabs = document.getElementById('shop-tabs');
+  if (tabs) {
+    tabs.innerHTML = '';
+    for (const [id, label] of SHOP_TABS) {
+      const b = document.createElement('button');
+      b.className = 'shop-tab' + (Game.shopTab === id ? ' sel' : ''); b.textContent = label;
+      b.addEventListener('click', (e) => { e.preventDefault(); onFirstGesture(); Game.shopTab = id; buildShop(); });
+      tabs.appendChild(b);
+    }
+  }
   grid.innerHTML = '';
   for (const item of shopCatalogue()) {
+    if (item.tab !== Game.shopTab) continue;
     const owned = itemOwned(item.key), poor = !owned && Game.points < item.price;
     const cell = document.createElement('div');
     cell.className = 'shop-item' + (owned ? ' owned' : '') + (poor ? ' poor' : '');
@@ -1391,7 +1429,7 @@ function startGame() {                         // TITLE → level 1 (points/hear
   // Safety: ensure a slot is active without clobbering current Game choices (mode/colour).
   if (Save.data.activeSlot == null) { Save.data.activeSlot = 0; if (!Save.data.slots[0]) Save.data.slots[0] = freshSlot(); Save.save(); }
   // Per-game reset: points to 0, hearts re-buyable, bought/earned hearts cleared.
-  Game.points = 0; Game.heartsBought = 0; Game.levelHearts = 0; Game.owned.heart = false; Game.owned.twoHearts = false; Game.owned.halfHeart = false; Game.heartAnim = null; Game.combo = 0; Game.floaters = [];
+  Game.points = 0; Game.heartsBought = 0; Game.levelHearts = 0; Game.owned.heart = false; Game.owned.twoHearts = false; Game.owned.halfHeart = false; Game.heartAnim = null; Game.combo = 0; Game.floaters = []; Game.regen = false; Game.regenT = 0;
   Game.level = 1; Game.hp = maxHearts();
   reseed(pickSeed());
   hideOverlay('start');
@@ -1417,6 +1455,7 @@ function startPlay() {
 
 function onBossDefeated() {
   Game.bossActive = false;
+  Game.regen = false;                           // regen potion lasts only its one level
   Game.points += 5;                             // bosses are worth 5 points
   // Easy/Normal grant a heart after every boss (the gauge grows by one).
   Game.gainedLife = !!MODES[Game.mode].levelHeart;
@@ -1427,7 +1466,7 @@ function onBossDefeated() {
 function afterClear() { gotoShop(); }              // merchant visits after every level
 
 function gotoShop() {
-  Game.scene = 'SHOP'; Game.sceneT = 0; Game.paused = false;
+  Game.scene = 'SHOP'; Game.sceneT = 0; Game.paused = false; Game.shopTab = 'skills';
   Game.merchant = {
     x: 40 + Math.random() * (CONFIG.W - 80), y: -34,
     landX: Math.max(60, Math.min(CONFIG.W - 60, Game.hero.x + 40)),
@@ -2092,6 +2131,7 @@ function update(dt) {
   if (h.dodgeCd > 0) h.dodgeCd = Math.max(0, h.dodgeCd - dt);
   if (h.frozen > 0) h.frozen = Math.max(0, h.frozen - dt);
   if (h.dizzy > 0) { h.dizzy = Math.max(0, h.dizzy - dt); if (h.dizzy === 0) dizzyFall(); }   // poison wobble → stumble into a hole
+  if (Game.regen) { Game.regenT = (Game.regenT || 0) + dt; if (Game.regenT >= 5) { Game.regenT -= 5; Game.hp = Math.min(maxHearts(), Game.hp + 0.25); Game.heartAnim = { t: 0, dur: 0.6 }; } }   // regen potion
   h.coyote = h.onGround ? C.COYOTE : Math.max(0, h.coyote - dt);
   h.jumpBuf = Input.consumeJump() ? C.JUMP_BUFFER : Math.max(0, h.jumpBuf - dt);
   const downPressed = Input.consumeDown();
@@ -2664,6 +2704,22 @@ function drawCostume(c, x, y, w, h, id, col) {
     case 17: // Bandana — red paisley-ish print (earned at the pickleball hall)
       c.fillStyle = '#b3122a'; c.fillRect(ix, iy, iw, ih);
       c.fillStyle = '#f2e9d0'; for (let gy = 0; gy < ih; gy += 3) for (let gx = (((gy / 3) | 0) & 1) ? 1.5 : 0; gx < iw; gx += 3) { c.fillRect(ix + gx, iy + gy, 1, 1); c.fillRect(ix + gx + 0.5, iy + gy + 0.5, 1.4, 1.4); }
+      break;
+    case 18: // Brazil — yellow with a green collar
+      c.fillStyle = '#f7d417'; c.fillRect(ix, iy, iw, ih);
+      c.fillStyle = '#1c8a3b'; c.fillRect(ix, iy, iw, 2); c.fillStyle = '#0a3d91'; c.fillRect(cx - 1, iy + 2, 2, 2);
+      break;
+    case 19: // France — blue / white / red vertical bands
+      c.fillStyle = '#0a3d91'; c.fillRect(ix, iy, iw / 3, ih); c.fillStyle = '#fff'; c.fillRect(ix + iw / 3, iy, iw / 3, ih); c.fillStyle = '#e0392f'; c.fillRect(ix + 2 * iw / 3, iy, iw / 3, ih);
+      break;
+    case 20: // Argentina — sky-blue and white vertical stripes
+      for (let sx = 0; sx < iw; sx += 3) { c.fillStyle = (((sx / 1.5) | 0) & 1) ? '#75aadb' : '#fff'; c.fillRect(ix + sx, iy, 2, ih); }
+      break;
+    case 21: // Germany — black chest band on white
+      c.fillStyle = '#eee8d5'; c.fillRect(ix, iy, iw, ih); c.fillStyle = '#111'; c.fillRect(ix, cy - 2, iw, 4); c.fillStyle = '#e0392f'; c.fillRect(ix, cy + 2, iw, 1);
+      break;
+    case 22: // Mexico — green with white + red trim
+      c.fillStyle = '#1c8a3b'; c.fillRect(ix, iy, iw, ih); c.fillStyle = '#fff'; c.fillRect(ix, cy - 1, iw, 2); c.fillStyle = '#e0392f'; c.fillRect(ix, iy + ih - 2, iw, 2);
       break;
     default: // fallback: plain colour block
       c.fillStyle = col; c.fillRect(ix, iy, iw, ih);
