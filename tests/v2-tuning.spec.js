@@ -162,3 +162,12 @@ test('enemies push apart instead of overlapping', async ({ page }) => {
   expect(r.before).toBeLessThan(2 * r.r);        // started overlapping
   expect(r.after).toBeGreaterThanOrEqual(2 * r.r - 1);   // pushed apart to (roughly) non-overlap
 });
+
+test('low-HP red vignette renders at ≤1 heart without errors', async ({ page }) => {
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  await openGame(page);
+  await page.evaluate(() => { window.BS.start(); window.BS.setLevel(1); window.BS.state().hp = 1; });
+  await page.waitForTimeout(120);   // let a few frames render the vignette
+  expect(errors).toEqual([]);
+});
