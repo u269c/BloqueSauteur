@@ -760,10 +760,22 @@ function genLevel(level, seed, world) {
     }
   }
   // Hazards (L2+): a scaling mix placed along the ground runs (gauntlets add their own too).
+  // Placement is spacing-aware — every hazard keeps a clear SAFE strip of footing on each side
+  // (and clears segment/hole edges), so you can always stand between them and time a pass. A
+  // hazard that can't find a fair spot is simply skipped (fewer, fair hazards > a wall of pain).
   const nHaz = level >= 2 ? level * 2 - 1 : 0;
+  const SAFE = 40;                                  // guaranteed standable/landable gap beside each hazard
   for (let i = 0; i < nHaz; i++) {
-    const g = mid[Math.floor(rand() * mid.length)];
-    hazards.push({ x: Math.round(g.x0 + 10 + rand() * Math.max(1, (g.x1 - g.x0) - 20)), top: g.top, kind: hzPool[Math.floor(rand() * hzPool.length)], ph: rand() * 3, range: 16 + rand() * 18 });
+    const kind = hzPool[Math.floor(rand() * hzPool.length)], range = 16 + rand() * 18, reach = hazardReach(kind, range);
+    for (let tries = 0; tries < 14; tries++) {
+      const g = mid[Math.floor(rand() * mid.length)];
+      const lo = g.x0 + reach + 12, hi = g.x1 - reach - 12;   // keep the danger zone off the segment/hole edges
+      if (hi <= lo) continue;                                 // segment too small for this hazard's reach
+      const hx = Math.round(lo + rand() * (hi - lo));
+      let ok = true;
+      for (const o of hazards) if (Math.abs(o.x - hx) < reach + hazardReach(o.kind, o.range) + SAFE) { ok = false; break; }
+      if (ok) { hazards.push({ x: hx, top: g.top, kind, ph: rand() * 3, range, reach }); break; }
+    }
   }
   // The Challenger: a stationary adventurer on L4, ~1/3 through the level.
   let challenger = null;
@@ -1951,6 +1963,25 @@ function hazardBox(hz) {
     case 'windgust': { const on = (tt % 3) < 1.2; return { x0: x - 4, y0: top - 42, x1: x + 52, y1: top, on }; }
     case 'bubble':   { const per = 2.4, y = top - (tt % per) / per * 46; return { x0: x - 6, y0: y - 6, x1: x + 6, y1: y + 6, on: true }; }
     default:           return { x0: x - 8, y0: top - 8, x1: x + 8, y1: top, on: true };
+  }
+}
+// Horizontal half-width of a hazard's danger zone, including its full range of motion.
+// Used to space hazards so there's always a safe strip to stand/land between them.
+function hazardReach(kind, range) {
+  const R = range || 22;
+  switch (kind) {
+    case 'boomerang': return R + 18;
+    case 'saw':       return R + 9;
+    case 'bees':      return R + 9;
+    case 'tornado':   return R + 8;
+    case 'mace':      return 44;
+    case 'windgust':  return 52;
+    case 'laser':     return 46;
+    case 'flamejet': case 'piston': return 26;
+    case 'sparkcloud':return 18;
+    case 'spore':     return 20;
+    case 'acid':      return 11;
+    default:          return 12;
   }
 }
 function updateHazards() {
@@ -3407,7 +3438,7 @@ window.BS = {
   scene: () => Game.scene,
   seed: () => Game.seed,
   reseed,
-  genTerrain, genArena, genLevel, worldForLevel, HAZARD_KINDS, HAZARDS_BY_WORLD, surfaceAt, findSafeX,
+  genTerrain, genArena, genLevel, worldForLevel, HAZARD_KINDS, HAZARDS_BY_WORLD, hazardReach, surfaceAt, findSafeX,
   terrain: () => Game.terrain,
   levelData: () => Game.levelData,
   phase: () => Game.phase,
