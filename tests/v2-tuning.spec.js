@@ -90,3 +90,26 @@ test('boss-arena kills score no points (neg. control: traverse kills do)', async
   expect(await pts('boss')).toBe(0);      // no farming during the boss duel
   expect(await pts('traverse')).toBe(1);  // neg. control: normal kills still score
 });
+
+test('blue donuts: rare on L3-5 only, home toward the hero, worth 3 points', async ({ page }) => {
+  await openGame(page);
+  await page.evaluate(() => window.BS.freeze(true));
+  const r = await page.evaluate(() => {
+    const blues = (lv) => { let tot = 0; for (let s = 0; s < 80; s++) tot += window.BS.genLevel(lv, s).enemies.filter((e) => e.type === 'blue').length; return tot; };
+    // behaviour: homing + score
+    window.BS.start(); window.BS.reseed(1); window.BS.setupArena(1);
+    const st = window.BS.state(); st.enemies.length = 0; st.points = 0;
+    const C = window.BS.CONFIG, h = window.BS.hero(); h.ghost = 1e9; Object.assign(h, { x: 300, y: C.PLAT_Y, onGround: true });
+    window.BS.spawnEnemy('blue'); const e = window.BS.enemies()[0]; e.homing = true; e.patrol = false; Object.assign(e, { x: 120, y: C.PLAT_Y, onGround: true });
+    const x0 = e.x; for (let k = 0; k < 90; k++) window.BS.stepFixed(1);
+    const moved = window.BS.enemies()[0].x - x0;
+    st.points = 0; const b = window.BS.enemies()[0]; Object.assign(h, { x: b.x, y: b.y - b.r - 3, vy: 60, onGround: false, ghost: 0 }); window.BS.stepFixed(3);
+    return { l1: blues(1), l2: blues(2), l3: blues(3), l45: blues(4) + blues(5), moved: Math.round(moved), pts: st.points };
+  });
+  expect(r.l1).toBe(0);              // never on levels 1-2
+  expect(r.l2).toBe(0);
+  expect(r.l3).toBeGreaterThan(0);   // present (rarely) on 3-5
+  expect(r.l45).toBeGreaterThan(0);
+  expect(r.moved).toBeGreaterThan(20);   // homed toward the hero (was to its right)
+  expect(r.pts).toBe(3);                 // worth 3 points
+});
