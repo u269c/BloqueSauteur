@@ -4,9 +4,9 @@
 const { test, expect } = require('@playwright/test');
 const { openGame, enterPlayPanel } = require('./helpers');
 
-test('there are 17 costumes (patterns + 4 FIFA jerseys)', async ({ page }) => {
+test('there are 18 costumes (patterns + 4 FIFA jerseys + earned Bandana)', async ({ page }) => {
   await openGame(page);
-  expect(await page.evaluate(() => window.BS.COSTUMES.length)).toBe(17);
+  expect(await page.evaluate(() => window.BS.COSTUMES.length)).toBe(18);
   // the jersey kits are present
   const names = await page.evaluate(() => window.BS.COSTUMES.map((c) => c.name));
   for (const kit of ['Canada Kit', 'Switzerland Kit', 'Norway Kit', 'Japan Kit']) expect(names).toContain(kit);
@@ -65,10 +65,11 @@ test('drawCostume renders every costume id without throwing', async ({ page }) =
   await openGame(page); await enterPlayPanel(page, 0);
   await page.evaluate(() => {
     const st = window.BS.state(); st.points = 99999;
-    for (const cost of window.BS.COSTUMES) window.BS.buyItem('costume:' + cost.id);
-    window.BS.buildShop();       // draws a shop icon (→ drawCostume) for every costume
-    window.BS.buildCostumes();   // draws a picker mannequin (→ drawCostume) for every owned costume
+    for (const cost of window.BS.COSTUMES) window.BS.buyItem('costume:' + cost.id);   // buys the 17 sold ones
+    if (!window.BS.costumes().includes(17)) window.BS.costumes().push(17);             // Bandana is earned, not sold
+    window.BS.buildShop();       // draws a shop icon (→ drawCostume) for every sold costume
+    window.BS.buildCostumes();   // draws a picker mannequin (→ drawCostume) for every owned costume (incl. Bandana)
   });
-  expect(await page.evaluate(() => window.BS.costumes().length)).toBe(17);
+  expect(await page.evaluate(() => window.BS.costumes().length)).toBe(18);
   expect(errors).toEqual([]);   // no id path threw
 });
