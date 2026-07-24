@@ -104,3 +104,22 @@ test('healing tab: Full Heal refills, Regen Potion ticks +¼ heart/5s next level
   });
   expect(regen).toBeCloseTo(2.25, 5);    // exactly one +¼ tick at 5s
 });
+
+test('health items refresh once per level; costumes shown in a 4-wide grid', async ({ page }) => {
+  await openGame(page); await enterPlayPanel(page, 0);
+  await toShop(page, 400);
+  const r = await page.evaluate(() => {
+    window.BS.buyItem('heart');                       // buy a heart → owned + banked
+    const boughtOwned = window.BS.state().owned.heart, banked = window.BS.state().heartsBought;
+    window.BS.gotoShop();                              // arrive at the NEXT level's shop
+    const refreshed = window.BS.state().owned.heart, kept = window.BS.state().heartsBought;
+    return { boughtOwned, banked, refreshed, kept };
+  });
+  expect(r.boughtOwned).toBe(true);      // greyed out this visit
+  expect(r.refreshed).toBe(false);       // buyable again next level
+  expect(r.kept).toBe(r.banked);         // …but the max-hearts bonus is kept
+  // costumes tab uses the 4-wide grid
+  await page.evaluate(() => { window.BS.gotoShop(); window.BS.buildShop(); });
+  await page.locator('#shop-tabs .shop-tab').nth(2).click();
+  await expect(page.locator('#shop-grid')).toHaveClass(/wide/);
+});

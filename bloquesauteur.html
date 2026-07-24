@@ -142,6 +142,7 @@
   .shop-tab { padding:1vmin 2.4vmin; font-size:min(3.2vmin,14px); font-weight:700; letter-spacing:.04em; color:#7a6a48; background:#efe4c8; border:2px solid #cdbfa0; border-radius:9px 9px 0 0; cursor:pointer; }
   .shop-tab.sel { color:#2a2320; background:#fffaf0; border-color:#2a2320; border-bottom-color:#fffaf0; }
   .shop-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:2vmin; max-height:52vh; overflow-y:auto; padding-right:1vmin; }
+  .shop-grid.wide { grid-template-columns:repeat(4,1fr); }   /* costumes: 3×4 table */
   .shop-item { background:#fffaf0; border:2px solid #cdbfa0; border-radius:12px; padding:1.6vmin 1vmin; text-align:center; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:.6vmin; }
   .shop-item:hover:not(.disabled) { border-color:#2e6b3a; background:#f2fbef; }
   .shop-item canvas { image-rendering:pixelated; width:min(11vmin,52px); height:min(11vmin,52px); }
@@ -1223,8 +1224,8 @@ function buyItem(key) {
   Game.points -= item.price;
   const cid = costumeIdOf(key);
   if (cid != null) { Game.owned.costumes.push(cid); Game.hero.costumeIdx = cid; }   // auto-equip on buy
-  else if (key === 'fullHeal') { Game.hp = maxHearts(); }                           // consumable — rebuyable
-  else if (key === 'regen') { Game.regen = true; Game.regenT = 0; }                 // ticks +¼ heart/5s next level
+  else if (key === 'fullHeal') { Game.owned.fullHeal = true; Game.hp = maxHearts(); }              // once per level (reset each shop)
+  else if (key === 'regen') { Game.owned.regen = true; Game.regen = true; Game.regenT = 0; }       // ticks +¼ heart/5s next level
   else {
     Game.owned[key] = true;
     // A bought heart raises the max AND heals by that same amount only (not a full refill).
@@ -1253,6 +1254,7 @@ function buildShop() {
     }
   }
   grid.innerHTML = '';
+  grid.classList.toggle('wide', Game.shopTab === 'costumes');   // costumes use a 4-wide table
   for (const item of shopCatalogue()) {
     if (item.tab !== Game.shopTab) continue;
     const owned = itemOwned(item.key), poor = !owned && Game.points < item.price;
@@ -1465,8 +1467,10 @@ function onBossDefeated() {
 }
 function afterClear() { gotoShop(); }              // merchant visits after every level
 
+const HEALING_KEYS = ['halfHeart', 'heart', 'twoHearts', 'fullHeal', 'regen'];
 function gotoShop() {
   Game.scene = 'SHOP'; Game.sceneT = 0; Game.paused = false; Game.shopTab = 'skills';
+  for (const k of HEALING_KEYS) Game.owned[k] = false;   // health items refresh — buyable once per level (max-hearts already banked in heartsBought)
   Game.merchant = {
     x: 40 + Math.random() * (CONFIG.W - 80), y: -34,
     landX: Math.max(60, Math.min(CONFIG.W - 60, Game.hero.x + 40)),
