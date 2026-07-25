@@ -264,6 +264,140 @@ test.describe('L6 maze — seeded generation', () => {
   });
 });
 
+// One room on a single floor with a locked key + its guarding orange pair, installed live.
+function installMinibossMaze() {
+  const T = 16, cols = 20, rows = 10, fr = 7;
+  const grid = new Uint8Array(cols * rows);
+  const S = (tx, ty) => { grid[ty * cols + tx] = 1; };
+  for (let ty = 0; ty < rows; ty++) { S(0, ty); S(cols - 1, ty); }
+  for (let tx = 0; tx < cols; tx++) { S(tx, 0); S(tx, rows - 1); }
+  for (let tx = 1; tx < cols - 1; tx++) S(tx, fr);
+  const key = { id: 0, tx: 3, ty: fr - 1, x: 3 * T + T / 2, y: fr * T, taken: false, locked: true };
+  const mb = { pairId: 0, keyId: 0, freed: false, a: { x: 10 * T, y: fr * T }, b: { x: 12 * T, y: fr * T } };
+  const mz = {
+    maze: true, level: 6, seed: 1, cols, rows, tileW: T, width: cols * T, height: rows * T, grid,
+    climbables: [], hazards: [], chests: [], floats: [], enemies: [], doors: [], keys: [key], keysNeeded: 0, minibosses: [mb],
+    spawn: { x: 2 * T, y: fr * T }, exit: { x: 18 * T, y: fr * T }, deathY: rows * T,
+  };
+  const st = window.BS.state();
+  st.terrain = mz; st.levelData = mz; st.phase = 'traverse'; st.scene = 'PLAY'; st.paused = false; st.keys = 0; st.mode = 'normal';
+  st.enemies.length = 0;
+  st.enemies.push(window.BS.makeOrange(mb.a.x, mb.a.y, 0, 0));
+  st.enemies.push(window.BS.makeOrange(mb.b.x, mb.b.y, 0, 0));
+  window.BS.freeze(true); window.BS.Input.reset();
+  return { T, fr };
+}
+
+test.describe('L6 maze — orange mini-boss pairs', () => {
+  test('genMaze guards each diamond key with a locked pair of orange mini-bosses', async ({ page }) => {
+    await openGame(page);
+    const r = await page.evaluate(() => {
+      let ok = true, any = false;
+      for (let s = 1; s <= 20; s++) {
+        const mz = window.BS.genMaze(6, s * 7919 >>> 0);
+        if (mz.minibosses.length !== mz.keys.length) ok = false;
+        if (!mz.keys.every((k) => k.locked)) ok = false;       // every key starts locked
+        if (mz.minibosses.length > 0) any = true;
+      }
+      return { ok, any };
+    });
+    expect(r.ok).toBe(true);
+    expect(r.any).toBe(true);
+  });
+
+  test('an orange takes exactly 6 hits, is orange, and homes toward the hero', async ({ page }) => {
+    await openGame(page); await enterPlayPanel(page, 0);
+    const r = await page.evaluate((src) => {
+      const install = new Function('return (' + src + ')')(); const { T, fr } = install();
+      const e = window.BS.enemies()[0];
+      const orange = e.type === 'orange' && window.BS.ENEMY_HITS.orange === 6;
+      // homing: hero far to the LEFT → the orange should move left over time
+      Object.assign(window.BS.hero(), { x: 2 * T, y: fr * T, vx: 0, vy: 0, onGround: true });
+      const x0 = e.x;
+      for (let i = 0; i < 120; i++) window.BS.updateMazeEnemies(1 / 120);
+      const homedLeft = e.x < x0 - 8;
+      // 6 hits: alive after 5, dead on the 6th
+      const e2 = window.BS.enemies()[1];
+      for (let i = 0; i < 5; i++) { e2.hitT = 0; window.BS.hitEnemy(e2); }
+      const aliveAfter5 = e2.alive;
+      e2.hitT = 0; window.BS.hitEnemy(e2);
+      return { orange, homedLeft, aliveAfter5, deadAfter6: !e2.alive };
+    }, installMinibossMaze.toString());
+    expect(r.orange).toBe(true);
+    expect(r.homedLeft).toBe(true);
+    expect(r.aliveAfter5).toBe(true);
+    expect(r.deadAfter6).toBe(true);
+  });
+
+  test('defeating BOTH of a pair frees its key; while one lives the key stays locked (neg. control)', async ({ page }) => {
+    await openGame(page); await enterPlayPanel(page, 0);
+    const r = await page.evaluate((src) => {
+      const install = new Function('return (' + src + ')')();
+      // NEGATIVE CONTROL: kill only ONE → key stays locked, uncollectible
+      install();
+      let es = window.BS.enemies();
+      for (let i = 0; i < 6; i++) { es[0].hitT = 0; window.BS.hitEnemy(es[0]); }
+      window.BS.updateMazeEnemies(1 / 120);
+      const mzA = window.BS.terrain();
+      const stillLocked = mzA.keys[0].locked === true && mzA.minibosses[0].freed === false;
+
+      // now kill BOTH → key frees
+      install();
+      es = window.BS.enemies();
+      for (const e of es) for (let i = 0; i < 6; i++) { e.hitT = 0; window.BS.hitEnemy(e); }
+      window.BS.updateMazeEnemies(1 / 120);
+      const mz = window.BS.terrain(), key = mz.keys[0];
+      const freed = key.locked === false && mz.minibosses[0].freed === true;
+      // freed key is now collectible
+      Object.assign(window.BS.hero(), { x: key.x, y: key.y });
+      window.BS.updateMazeInteract(mz, window.BS.hero());
+      return { stillLocked, freed, collected: window.BS.mazeKeys() === 1 && key.taken };
+    }, installMinibossMaze.toString());
+    expect(r.stillLocked).toBe(true);   // negative control
+    expect(r.freed).toBe(true);
+    expect(r.collected).toBe(true);
+  });
+
+  test('a full pair telegraphs then hurls a partner projectile that damages the hero', async ({ page }) => {
+    await openGame(page); await enterPlayPanel(page, 0);
+    const r = await page.evaluate((src) => {
+      const install = new Function('return (' + src + ')')(); const { T, fr } = install();
+      const h = window.BS.hero(), es = window.BS.enemies(), st = window.BS.state();
+      Object.assign(h, { x: 11 * T, y: fr * T, vx: 0, vy: 0, onGround: true, hurt: 0, ghost: 0, dodgeT: 0 });
+      es.forEach((e) => { e.throwCd = 0; e.onGround = true; });
+      const hp0 = st.hp;
+      let sawTele = false, sawThrown = false;
+      for (let i = 0; i < 360; i++) { window.BS.updateMazeEnemies(1 / 120); if (es.some((e) => e.tele > 0)) sawTele = true; if (es.some((e) => e.thrown)) sawThrown = true; }
+      return { sawTele, sawThrown, tookDamage: st.hp < hp0 };
+    }, installMinibossMaze.toString());
+    expect(r.sawTele).toBe(true);       // wind-up telegraph fired
+    expect(r.sawThrown).toBe(true);     // a partner was launched
+    expect(r.tookDamage).toBe(true);    // and it (or contact) chipped the hero
+  });
+
+  test('a thrown projectile is what deals the hit (neg. control: a grounded one at range does not)', async ({ page }) => {
+    await openGame(page); await enterPlayPanel(page, 0);
+    const r = await page.evaluate((src) => {
+      const install = new Function('return (' + src + ')')(); const { T, fr } = install();
+      const h = window.BS.hero(), st = window.BS.state();
+      st.enemies.length = 1;                          // isolate a single orange (no contact from a partner)
+      const e = window.BS.enemies()[0];
+      Object.assign(e, { x: 10 * T, y: fr * T, onGround: true });
+      Object.assign(h, { x: 10 * T + 44, y: fr * T, vx: 0, vy: 0, hurt: 0, ghost: 0, dodgeT: 0 });
+      // NEGATIVE CONTROL: grounded orange 44px away → no hit this frame
+      const hpA = st.hp; window.BS.updateMazeEnemies(1 / 120);
+      const noHitGrounded = st.hp === hpA;
+      // now hurl it at the hero → it flies in and lands a hit
+      e.role = 'proj'; e.tele = 0.001;
+      let hit = false; const hp0 = st.hp;
+      for (let i = 0; i < 120 && !hit; i++) { window.BS.updateMazeEnemies(1 / 120); if (st.hp < hp0) hit = true; }
+      return { noHitGrounded, wasThrownAndHit: hit };
+    }, installMinibossMaze.toString());
+    expect(r.noHitGrounded).toBe(true);      // negative control
+    expect(r.wasThrownAndHit).toBe(true);
+  });
+});
+
 test.describe('L6 maze — doors + diamond keys', () => {
   test('genMaze places locked doors, one diamond key each, all closed in the grid', async ({ page }) => {
     await openGame(page);
