@@ -912,7 +912,7 @@ function genMaze(level, seed) {
     if (lk & 2) { const wx = x0 + cw - 1; for (let ty = fr - 3; ty < fr; ty++) { carve(wx, ty); carve(wx + 1, ty); } }   // EAST doorway (3 tiles tall, at floor level)
     if (lk & 4) {                                            // SOUTH link → a climb-shaft down to the cell below
       const sx = x0 + Math.floor(cw / 2), belowFr = floorRowOf(cy + 1);
-      for (let ty = fr; ty < belowFr; ty++) carve(sx, ty);   // punch the shaft (upper floor tile stays for standing; ladder overlays it)
+      for (let ty = fr + 1; ty < belowFr; ty++) carve(sx, ty);   // punch the shaft, but KEEP the upper floor tile (fr) solid so you can climb up and stand off the rope (the ladder overlays it; climbing clamps to its surface)
       climbables.push({ x: sx * T + T / 2, top: fr * T, bot: belowFr * T, kind: CLIMB_KINDS[(cx + cy * 3 + level) % CLIMB_KINDS.length] });
     }
   }
@@ -942,8 +942,11 @@ function genMaze(level, seed) {
 function mazeSolvable(mz) {
   const T = mz.tileW, cols = mz.cols, rows = mz.rows;
   const empty = (tx, ty) => !tileSolid(mz, tx, ty);
-  const climbAt = (tx, ty) => mz.climbables.some((c) => Math.floor(c.x / T) === tx && ty * T >= c.top - T && ty * T <= c.bot);
-  const standable = (tx, ty) => empty(tx, ty) && (tileSolid(mz, tx, ty + 1) || climbAt(tx, ty));
+  const standable = (tx, ty) => empty(tx, ty) && tileSolid(mz, tx, ty + 1);
+  // A ladder bidirectionally links its two perches (the standable body-tiles at each end);
+  // the top floor tile between them is solid, so this link — not tile-by-tile climbing — is
+  // how the hero crosses it (matches the in-game climb clamping to the top surface).
+  const ladders = mz.climbables.map((c) => ({ cx: Math.floor(c.x / T), a: Math.round(c.top / T) - 1, b: Math.round(c.bot / T) - 1 }));
   const start = { tx: Math.floor(mz.spawn.x / T), ty: Math.round(mz.spawn.y / T) - 1 };
   const goal = { tx: Math.floor(mz.exit.x / T), ty: Math.round(mz.exit.y / T) - 1 };
   const seen = new Set(), q = [start]; seen.add(start.ty * cols + start.tx);
@@ -956,8 +959,11 @@ function mazeSolvable(mz) {
       if (empty(tx + dx, ty) && standable(tx + dx, ty - 1)) push(tx + dx, ty - 1);   // step up a ledge
       if (standable(tx + dx, ty + 1)) push(tx + dx, ty + 1);                  // step down a ledge
     }
-    if (climbAt(tx, ty)) { if (climbAt(tx, ty - 1) || standable(tx, ty - 1)) push(tx, ty - 1); if (empty(tx, ty + 1)) push(tx, ty + 1); }   // climb
-    let dy = ty; while (dy + 1 < rows && empty(tx, dy + 1) && !climbAt(tx, dy)) dy++;   // gravity drop
+    for (const L of ladders) {                                               // climb a shaft (perch ↔ perch)
+      if (tx === L.cx && ty === L.a) push(L.cx, L.b);
+      if (tx === L.cx && ty === L.b) push(L.cx, L.a);
+    }
+    let dy = ty; while (dy + 1 < rows && empty(tx, dy + 1)) dy++;             // gravity drop to the floor below
     if (standable(tx, dy)) push(tx, dy);
   }
   return false;

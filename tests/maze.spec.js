@@ -144,6 +144,40 @@ test.describe('L6 maze — seeded generation', () => {
     expect(r.deadEnds).toBeGreaterThan(0);     // a perfect maze always has dead-ends to explore
   });
 
+  test('every climb-shaft has SOLID FLOOR at its top perch (you can climb up and stand off it)', async ({ page }) => {
+    await openGame(page);
+    const bad = await page.evaluate(() => {
+      const T = 16, misses = [];
+      for (let s = 1; s <= 30; s++) {
+        const mz = window.BS.genMaze(6, s * 40503 >>> 0);
+        for (const c of mz.climbables) {
+          const cx = Math.floor(c.x / T), topFloorRow = Math.round(c.top / T);
+          if (!window.BS.tileSolid(mz, cx, topFloorRow)) misses.push({ s, cx, topFloorRow });   // hole at the top = you fall back down
+        }
+      }
+      return misses;
+    });
+    expect(bad).toEqual([]);   // regression: the shaft used to carve away the top floor tile
+  });
+
+  test('climbing to the top of a shaft lands you on the floor (you do not fall back down)', async ({ page }) => {
+    await enterMaze(page, 777);
+    const r = await page.evaluate(() => {
+      const mz = window.BS.terrain(), h = window.BS.hero(), c = mz.climbables[0];
+      // start at the shaft bottom, hold UP to climb to the top perch
+      Object.assign(h, { x: c.x, y: c.bot, vx: 0, vy: 0, climbing: false, onGround: true });
+      window.BS.Input.reset(); window.BS.Input.press('jump', true);
+      for (let i = 0; i < 240; i++) window.BS.step(1 / 120);
+      const reachedTop = Math.abs(h.y - c.top) < 2;
+      // release everything and let physics settle — the hero must STAY on the floor
+      window.BS.Input.reset();
+      for (let i = 0; i < 180; i++) window.BS.step(1 / 120);
+      return { reachedTop, stayedUp: Math.abs(h.y - c.top) < 2 && h.onGround, y: h.y, top: c.top };
+    });
+    expect(r.reachedTop).toBe(true);
+    expect(r.stayedUp).toBe(true);   // the bug: hero fell straight back down the shaft
+  });
+
   test('the 2D camera follows the hero in X and Y and clamps to the maze bounds', async ({ page }) => {
     await enterMaze(page);
     const r = await page.evaluate(() => {
