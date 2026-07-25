@@ -78,6 +78,23 @@
   .play-btn:active { transform:translateY(2px); box-shadow:0 2px 0 #b58900; }
   .play-btn.ghost { background:transparent; color:#b6c2c6; border:2px solid rgba(255,255,255,0.25); box-shadow:none; font-size:min(3.8vmin,17px); padding:1.4vmin 4vmin; }
 
+  /* ── DEV panel: a discreet gear in the title corner opens a testing panel ── */
+  #dev-btn { position:fixed; right:1.4vmin; bottom:1.2vmin; z-index:22; width:30px; height:30px;
+    font-size:16px; line-height:26px; text-align:center; color:#4d5c62; background:rgba(10,12,22,0.4);
+    border:1px solid rgba(255,255,255,0.10); border-radius:8px; cursor:pointer; opacity:.32; padding:0; }
+  #dev-btn:hover { opacity:.95; color:#eee8d5; }
+  #dev .dev-card { background:#12151f; border:2px solid rgba(255,255,255,0.14); border-radius:14px;
+    padding:2.4vmin 3vmin; max-width:min(92vw,620px); width:100%; max-height:88vh; overflow-y:auto; }
+  #dev h2 { color:#f4d03f; font-size:min(6vmin,26px); margin:0 0 1vmin; letter-spacing:.05em; }
+  #dev .dev-sec { margin:1.4vmin 0; }
+  #dev .dev-lbl { font-size:min(3.2vmin,13px); color:#93a1a1; letter-spacing:.08em; text-transform:uppercase; margin-bottom:.6vmin; }
+  #dev .dev-row { display:flex; flex-wrap:wrap; gap:.7vmin; justify-content:center; }
+  .dev-chip { font-size:min(3.2vmin,13px); font-weight:700; color:#b6c2c6; background:rgba(255,255,255,0.06);
+    border:2px solid rgba(255,255,255,0.16); border-radius:8px; padding:.7vmin 1.4vmin; cursor:pointer; }
+  .dev-chip.on { color:#101018; background:#7cb342; border-color:#7cb342; }
+  .dev-chip.lvl { min-width:46px; }
+  .dev-chip.lvl:hover { border-color:#f4d03f; color:#f4d03f; }
+
   /* ── Single-screen loadout: [big hero] [colour squares] [mode buttons] ── */
   .loadout { display:flex; align-items:center; justify-content:center; gap:3vmin; margin-top:0.5vmin; }
   #hero-preview { image-rendering:pixelated; height:min(31vmin,178px); width:auto; background:rgba(255,255,255,0.05); border:2px solid rgba(255,255,255,0.14); border-radius:10px; padding:4px; align-self:center; }
@@ -198,6 +215,7 @@
     </div>
     <button class="play-btn" id="play-btn">▶ PLAY</button>
     <p class="version" id="version"></p>
+    <button id="dev-btn" title="dev mode" aria-label="dev mode">⚙</button>
   </div>
 
   <div class="overlay hidden" id="pause">
@@ -224,6 +242,16 @@
         <button class="play-btn" id="challenge-yes">Oui!</button>
         <button class="play-btn ghost" id="challenge-no">No Thanks</button>
       </div>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="dev">
+    <div class="dev-card">
+      <h2>⚙ DEV MODE</h2>
+      <div class="dev-sec"><div class="dev-lbl">Skills</div><div class="dev-row" id="dev-skills"></div></div>
+      <div class="dev-sec"><div class="dev-lbl">Costumes</div><div class="dev-row" id="dev-costumes"></div></div>
+      <div class="dev-sec"><div class="dev-lbl">Jump to level (starts a fresh game with the loadout above)</div><div class="dev-row" id="dev-levels"></div></div>
+      <button class="play-btn ghost" id="dev-close">CLOSE</button>
     </div>
   </div>
 
@@ -1068,6 +1096,8 @@ function initInput() {
   // Title / pause / HUD buttons
   const on = (id, fn) => document.getElementById(id).addEventListener('click', (e) => { e.preventDefault(); onFirstGesture(); fn(); });
   on('play-btn', () => startGame());
+  on('dev-btn', () => { buildDevPanel(); showOverlay('dev'); });
+  on('dev-close', () => hideOverlay('dev'));
   on('shop-leave', () => closeShop());
   on('challenge-yes', () => { hideOverlay('challenge'); Game.paused = false; Audio.applyGain(); startPickle(); });
   on('challenge-no', () => { hideOverlay('challenge'); Game.paused = false; Audio.applyGain(); if (Game.levelData && Game.levelData.challenger) Game.levelData.challenger.done = true; });
@@ -1140,6 +1170,55 @@ function buildCostumes() {
     else { g.fillStyle = '#0a0a0a'; g.fillRect(5, 3, 14, 18); drawCostume(g, 5, 3, 14, 18, id, '#39a0ed'); }
     b.addEventListener('click', (e) => { e.preventDefault(); onFirstGesture(); Game.hero.costumeIdx = id; Save.save(); buildCostumes(); drawHeroPreview(); });
     box.appendChild(b);
+  }
+}
+
+// ── DEV mode ──
+// A discreet title-screen panel for fast iteration: toggle every persistent skill and
+// every costume, then jump straight into any level (starts a fresh game with that loadout).
+// Toggles write to the active slot via Save.save() so the test loadout sticks.
+function buildDevPanel() {
+  const sk = document.getElementById('dev-skills'); if (!sk) return;
+  sk.innerHTML = '';
+  const SKILL_LABEL = { paddle: 'Paddle' };   // paddle is earned via pickleball, not sold in the shop
+  for (const key of PERSISTENT_ITEMS) {
+    const b = document.createElement('button');
+    b.className = 'dev-chip' + (Game.owned[key] ? ' on' : '');
+    b.textContent = (SHOP_ITEMS.find((s) => s.key === key) || {}).name || SKILL_LABEL[key] || key;
+    b.dataset.skill = key;
+    b.addEventListener('click', (e) => { e.preventDefault(); Game.owned[key] = !Game.owned[key]; Save.save(); buildDevPanel(); });
+    sk.appendChild(b);
+  }
+  const co = document.getElementById('dev-costumes'); co.innerHTML = '';
+  const allOwned = COSTUMES.every((c) => Game.owned.costumes.includes(c.id));
+  const allBtn = document.createElement('button');
+  allBtn.className = 'dev-chip' + (allOwned ? ' on' : ''); allBtn.textContent = 'ALL'; allBtn.dataset.costume = 'all';
+  allBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (allOwned) { Game.owned.costumes = []; Game.hero.costumeIdx = -1; }
+    else { Game.owned.costumes = COSTUMES.map((c) => c.id); }
+    Save.save(); buildDevPanel(); buildCostumes(); drawHeroPreview();
+  });
+  co.appendChild(allBtn);
+  for (const c of COSTUMES) {
+    const b = document.createElement('button');
+    b.className = 'dev-chip' + (Game.owned.costumes.includes(c.id) ? ' on' : '');
+    b.textContent = c.name; b.dataset.costume = String(c.id);
+    b.addEventListener('click', (e) => {
+      e.preventDefault();
+      const arr = Game.owned.costumes, i = arr.indexOf(c.id);
+      if (i >= 0) { arr.splice(i, 1); if (Game.hero.costumeIdx === c.id) Game.hero.costumeIdx = -1; }
+      else arr.push(c.id);
+      Save.save(); buildDevPanel(); buildCostumes(); drawHeroPreview();
+    });
+    co.appendChild(b);
+  }
+  const lv = document.getElementById('dev-levels'); lv.innerHTML = '';
+  for (let n = 1; n <= LAST_LEVEL; n++) {
+    const b = document.createElement('button');
+    b.className = 'dev-chip lvl'; b.textContent = 'L' + n; b.dataset.level = String(n);
+    b.addEventListener('click', (e) => { e.preventDefault(); onFirstGesture(); hideOverlay('dev'); startGame(n); });
+    lv.appendChild(b);
   }
 }
 
@@ -1489,12 +1568,12 @@ const Audio = {
 function firstGesture() { Audio.ensure(); }   // unlock audio on the very first gesture
 
 function maxHearts() { return CONFIG.LIVES_START + (Game.heartsBought | 0) + (Game.levelHearts | 0); }
-function startGame() {                         // TITLE → level 1 (points/hearts reset per game)
+function startGame(startLevel) {               // TITLE → level 1 (points/hearts reset per game); DEV mode may jump to a level
   // Safety: ensure a slot is active without clobbering current Game choices (mode/colour).
   if (Save.data.activeSlot == null) { Save.data.activeSlot = 0; if (!Save.data.slots[0]) Save.data.slots[0] = freshSlot(); Save.save(); }
   // Per-game reset: points to 0, hearts re-buyable, bought/earned hearts cleared.
   Game.points = 0; Game.heartsBought = 0; Game.levelHearts = 0; Game.owned.heart = false; Game.owned.twoHearts = false; Game.owned.halfHeart = false; Game.heartAnim = null; Game.combo = 0; Game.floaters = []; Game.regen = false; Game.regenT = 0;
-  Game.level = 1; Game.hp = maxHearts();
+  Game.level = Math.max(1, Math.min(LAST_LEVEL, (startLevel | 0) || 1)); Game.hp = maxHearts();
   reseed(pickSeed());
   hideOverlay('start');
   Audio.sfx('start');
@@ -3561,7 +3640,7 @@ window.BS = {
   transition: () => Game.transition,
   pause: togglePause,
   isPaused: () => Game.paused,
-  buildSwatches,
+  buildSwatches, buildDevPanel,
   // Deterministic stepping (bypasses rAF) for physics tests.
   freeze: (on) => { testFreeze = !!on; },
   step: (dt) => update(dt),
