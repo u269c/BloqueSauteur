@@ -88,11 +88,12 @@ test.describe('dev mode', () => {
     expect(r).toEqual({ level: 2, shield: true, dj: true });
   });
 
-  test('level chips cover exactly levels 1..LAST_LEVEL', async ({ page }) => {
+  test('level chips cover exactly levels 1..maxPlayableLevel (includes the L6 maze)', async ({ page }) => {
     await openGame(page);
     await enterPlayPanel(page, 0);
     await page.locator('#dev-btn').click();
-    const n = await page.evaluate(() => window.BS.LAST_LEVEL);
+    const n = await page.evaluate(() => window.BS.maxPlayableLevel());
     await expect(page.locator('#dev-levels .dev-chip')).toHaveCount(n);
+    expect(n).toBeGreaterThanOrEqual(6);   // the maze is reachable
   });
 });

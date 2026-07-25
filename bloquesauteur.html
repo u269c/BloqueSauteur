@@ -332,6 +332,12 @@ const LEVELS = {
   5: { types: ['clear', 'red', 'yellow'], spawnEvery: 1.3, speed: 34, maxAlive: 8, boss: 'volcano' },
 };
 const LAST_LEVEL = 5;
+// Level 6 — "THE LABYRINTH" — is a full 2D grid maze on a second, tile-grid collision
+// engine (see genMaze / collideHeroMaze). It's not part of the campaign progression yet
+// (LAST_LEVEL is still 5, so clearing L5 still ends the game); until the finale is wired,
+// it's reachable only via DEV mode. maxPlayableLevel() is the DEV level ceiling.
+const MAZE_LEVEL = 6;
+function maxPlayableLevel() { return Math.max(LAST_LEVEL, MAZE_LEVEL); }
 // v2.0 side-scroll: per-level count of holes + one-way jump-up floats along the run
 // (scaled up with the level). Also how many enemies to pre-place.
 // Hole counts are tuned so total level WIDTH is ~5x the original draft (the fixed
@@ -378,7 +384,7 @@ const MODES = {
   rage:   { name: 'RAGE MODE', hitDamage: 0.5,  knockOnHit: true,  levelHeart: false, spawners: 2, spawnMul: 1.5, pointPenalty: 1, bossHits: { 1: 6, 2: 8, 3: 10, 4: 12, 5: 12 }, musicRate: 1.3, musicWave: 'sawtooth' },
 };
 
-const LEVEL_NAMES = { 1: 'THE SHALLOWS', 2: 'BROKEN GROUND', 3: 'THE GAPS', 4: 'INFERNO', 5: 'THE VOLCANO' };
+const LEVEL_NAMES = { 1: 'THE SHALLOWS', 2: 'BROKEN GROUND', 3: 'THE GAPS', 4: 'INFERNO', 5: 'THE VOLCANO', 6: 'THE LABYRINTH' };
 
 // ── Aesthetic themes (purely visual; gameplay is levels 1–5) ──
 // Each run randomly (seeded) assigns a sky + a world to each level.
@@ -833,6 +839,59 @@ function genLevel(level, seed, world) {
   return { level, seed: seed >>> 0, traverse: true, ground, floats, enemies, chests, climbables, hazards, bossPit, bossSign, challenger, width: x, exitX, top, baseTop: top, x0: 0, x1: x, colW: T };
 }
 const genArena = genTerrain;   // the boss arena is the classic single-screen terrain
+
+// ══════════════════════════════════════════════════════════════════
+//  LEVEL 6 — THE LABYRINTH: a 2D grid maze on a tile-grid collision engine
+// ══════════════════════════════════════════════════════════════════
+// The maze is a row-major Uint8Array of tile codes (0 empty, 1 wall). Unlike the heightfield
+// terrain (one ground-top per column), tiles are solid on ALL FOUR SIDES — so tunnels,
+// ceilings and dead-ends are possible. genMaze (PR-A) returns a hand-authored TEST maze;
+// PR-B swaps the body for seeded generation. The returned descriptor is the contract every
+// later stream builds on (doors, diamond keys, orange mini-bosses, the evil-hero boss).
+const MZ = { EMPTY: 0, WALL: 1 };
+// Does tile (tx,ty) block the hero? Out-of-bounds sides/top are solid (the maze is
+// contained); below the grid is open, so a bottom pit drops the hero out to deathY.
+function tileSolid(mz, tx, ty) {
+  if (tx < 0 || tx >= mz.cols || ty < 0) return true;
+  if (ty >= mz.rows) return false;
+  return mz.grid[ty * mz.cols + tx] === MZ.WALL;
+}
+// World-space: is point (x,y) inside a solid tile?
+function mazeSolidAt(mz, x, y) { return tileSolid(mz, Math.floor(x / mz.tileW), Math.floor(y / mz.tileW)); }
+// Topmost solid surface at world-x, at or below world-y (grounded enemies land on this in
+// PR-D). Returns the surface world-y, or null if nothing solid below.
+function mazeSurfaceAt(mz, x, fromY) {
+  const T = mz.tileW, tx = Math.floor(x / T);
+  if (tx < 0 || tx >= mz.cols) return null;
+  for (let ty = Math.max(0, Math.floor(fromY / T)); ty < mz.rows; ty++) if (mz.grid[ty * mz.cols + tx] === MZ.WALL) return ty * T;
+  return null;
+}
+
+// Hand-authored deterministic test maze (PR-A): a bordered room larger than the screen in
+// BOTH dimensions, with a floor, an interior wall, a ceiling overhang and a bottom pit —
+// enough to exercise 4-side collision, 2D-camera clamping and fall-out death. Seeded
+// generation replaces this body in PR-B; the descriptor shape stays fixed.
+function genMaze(level, seed) {
+  const T = CONFIG.TILE, cols = 44, rows = 30;              // 704 × 480 world (≈1.5 × 1.8 screens)
+  const grid = new Uint8Array(cols * rows);
+  const set = (tx, ty, v) => { if (tx >= 0 && tx < cols && ty >= 0 && ty < rows) grid[ty * cols + tx] = v; };
+  for (let tx = 0; tx < cols; tx++) { set(tx, 0, MZ.WALL); set(tx, rows - 1, MZ.WALL); }   // solid border
+  for (let ty = 0; ty < rows; ty++) { set(0, ty, MZ.WALL); set(cols - 1, ty, MZ.WALL); }
+  const FR = rows - 3;                                       // main floor, two rows above the bottom
+  for (let tx = 1; tx < cols - 1; tx++) set(tx, FR, MZ.WALL);
+  for (let ty = FR - 4; ty < FR; ty++) set(14, ty, MZ.WALL); // interior wall — blocks a straight run
+  for (let ty = 1; ty <= 6; ty++) { set(24, ty, MZ.WALL); set(25, ty, MZ.WALL); }   // ceiling overhang
+  for (let tx = 30; tx <= 33; tx++) { set(tx, FR, MZ.EMPTY); set(tx, rows - 1, MZ.EMPTY); }   // bottom pit
+  const floorY = FR * T;
+  return {
+    maze: true, level, seed: seed >>> 0,
+    cols, rows, tileW: T, width: cols * T, height: rows * T, grid,
+    climbables: [], hazards: [], chests: [], floats: [], enemies: [],
+    doors: [], keysNeeded: 0, minibosses: [],
+    spawn: { x: 2.5 * T, y: floorY }, exit: { x: (cols - 3) * T, y: floorY },
+    deathY: rows * T,                                        // feet past the grid bottom = fell out
+  };
+}
 // Ground top at world-x for a traversal level (floats excluded), or null over a hole.
 function groundTopAt(lvl, x) { for (const g of lvl.ground) if (x >= g.x0 && x < g.x1) return g.top; return null; }
 // Nearest solid ground centre to x (traversal respawn).
@@ -877,7 +936,7 @@ const Game = {
   level: 1,
   phase: 'traverse',     // v2.0: 'traverse' (scroll to the exit) | 'boss' (locked arena)
   levelData: null,       // the traversal Level descriptor (ground/floats/enemies/exitX)
-  cam: { x: 0 },         // horizontal camera offset (world→screen)
+  cam: { x: 0, y: 0 },   // camera offset (world→screen); y is only non-zero in the L6 maze
   mode: 'normal',        // easy | normal | rage
   hp: CONFIG.LIVES_START, // health in hearts (fractional)
   terrain: null,         // current-phase terrain: the Level (traverse) or the arena (boss)
@@ -980,9 +1039,33 @@ function reseed(seed) {
   Game.themeOrder = { worlds: shuffled(WORLD_KEYS, trng), skies: shuffled(SKY_KEYS, trng) };
   buildLevel();
 }
+// Level 6 stands up the tile-grid maze instead of the scrolling heightfield terrain.
+function buildMazeLevel() {
+  Game.theme = { world: 'shadow', sky: 'thunder' };   // PR-E gives this its B&W high-contrast look
+  Game.levelData = genMaze(Game.level, Game.seed);
+  Game.terrain = Game.levelData;
+  Game.cam.x = 0; Game.cam.y = 0;
+  Game.mazeExitReached = false;
+  Game.hitThisLevel = false;
+  Game.enemies = []; Game.pickups = []; Game.boss = null; Game.bossActive = false;
+  Game.spawnT = 1e9;                                   // no ambient spawns in the maze (its foes are placed in PR-D)
+  const sp = Game.levelData.spawn;
+  Object.assign(Game.hero, {
+    x: sp.x, y: sp.y, vx: 0, vy: 0,
+    onGround: true, coyote: 0, jumpBuf: 0, jumping: false, hurt: 0, knock: 0, ghost: 0, dead: false,
+    airJumps: 0, shieldT: 0, shieldCd: 0, dodgeT: 0, dodgeCd: 0, strong: false, frozen: 0, dizzy: 0, bigJump: 0, climbing: false,
+  });
+}
+// Reaching the maze exit — the evil-hero boss duel is wired in PR-F; for now it's a marker.
+function onMazeExit() {
+  if (Game.mazeExitReached) return;
+  Game.mazeExitReached = true;
+  addFloater(Game.hero.x, Game.hero.y - 20, 'EXIT!', '#8fd0ff');
+}
 function buildLevel() {
   // A level begins in the scrolling TRAVERSE phase (the boss arena comes at the exit).
   Game.phase = 'traverse';
+  if (Game.level === MAZE_LEVEL) { buildMazeLevel(); return; }
   // Assign this level's look first (debug override: ?theme=world,sky) so the terrain can theme its hazards.
   const o = Game.themeOrder || { worlds: WORLD_KEYS, skies: SKY_KEYS };
   const i = (Game.level - 1);
@@ -1026,7 +1109,8 @@ function enterBossArena() {
 function respawnHero() {
   const h = Game.hero, C = CONFIG;
   let sx, sy;
-  if (Game.phase === 'traverse') { sx = findGroundX(Game.levelData, h.x); sy = groundTopAt(Game.levelData, sx) ?? Game.levelData.top; }
+  if (Game.terrain && Game.terrain.maze) { sx = Game.levelData.spawn.x; sy = Game.levelData.spawn.y; }   // maze: back to the entrance
+  else if (Game.phase === 'traverse') { sx = findGroundX(Game.levelData, h.x); sy = groundTopAt(Game.levelData, sx) ?? Game.levelData.top; }
   else { sx = findSafeX(Game.terrain); sy = surfaceAt(Game.terrain, sx) ?? C.PLAT_Y; }
   Object.assign(h, {
     x: sx, y: sy, vx: 0, vy: 0,
@@ -1214,7 +1298,7 @@ function buildDevPanel() {
     co.appendChild(b);
   }
   const lv = document.getElementById('dev-levels'); lv.innerHTML = '';
-  for (let n = 1; n <= LAST_LEVEL; n++) {
+  for (let n = 1; n <= maxPlayableLevel(); n++) {
     const b = document.createElement('button');
     b.className = 'dev-chip lvl'; b.textContent = 'L' + n; b.dataset.level = String(n);
     b.addEventListener('click', (e) => { e.preventDefault(); onFirstGesture(); hideOverlay('dev'); startGame(n); });
@@ -1573,7 +1657,7 @@ function startGame(startLevel) {               // TITLE → level 1 (points/hear
   if (Save.data.activeSlot == null) { Save.data.activeSlot = 0; if (!Save.data.slots[0]) Save.data.slots[0] = freshSlot(); Save.save(); }
   // Per-game reset: points to 0, hearts re-buyable, bought/earned hearts cleared.
   Game.points = 0; Game.heartsBought = 0; Game.levelHearts = 0; Game.owned.heart = false; Game.owned.twoHearts = false; Game.owned.halfHeart = false; Game.heartAnim = null; Game.combo = 0; Game.floaters = []; Game.regen = false; Game.regenT = 0;
-  Game.level = Math.max(1, Math.min(LAST_LEVEL, (startLevel | 0) || 1)); Game.hp = maxHearts();
+  Game.level = Math.max(1, Math.min(maxPlayableLevel(), (startLevel | 0) || 1)); Game.hp = maxHearts();
   reseed(pickSeed());
   hideOverlay('start');
   Audio.sfx('start');
@@ -1910,6 +1994,39 @@ function collideHeroScroll(h, dt) {
     for (const g of lvl.ground) if (h.x >= g.x0 && h.x < g.x1 && h.y >= g.top && feetPrev <= g.top + 8 && (gy == null || g.top < gy)) gy = g.top;   // land on top (not teleport up through a raised wall)
     for (const f of lvl.floats) if (h.x >= f.x && h.x < f.x + f.w && h.y >= f.y && feetPrev <= f.y + 2 && (gy == null || f.y < gy)) gy = f.y;   // one-way: only when landing from above
     if (gy != null) { h.y = gy; h.vy = 0; h.onGround = true; }
+  }
+}
+
+// L6 maze physics: axis-separated AABB vs solid tiles — walls, ceilings AND floors all
+// block (4-side solidity), which is what makes tunnels/dead-ends possible. Hero.x is the
+// centre, hero.y is the feet (bottom); h.w × h.h is the body box. At 120 Hz the per-step
+// travel (≤~4.3px) is well under a tile (16px), so no tunnelling.
+function collideHeroMaze(h, dt) {
+  const mz = Game.terrain, T = mz.tileW, hw = h.w / 2;
+  // ── horizontal ──
+  h.x += h.vx * dt;
+  {
+    const ty0 = Math.floor((h.y - h.h + 1) / T), ty1 = Math.floor((h.y - 1) / T);   // body rows (shrunk to dodge corners)
+    if (h.vx > 0) {
+      const tx = Math.floor((h.x + hw) / T);
+      for (let ty = ty0; ty <= ty1; ty++) if (tileSolid(mz, tx, ty)) { h.x = tx * T - hw; h.vx = 0; break; }
+    } else if (h.vx < 0) {
+      const tx = Math.floor((h.x - hw) / T);
+      for (let ty = ty0; ty <= ty1; ty++) if (tileSolid(mz, tx, ty)) { h.x = (tx + 1) * T + hw; h.vx = 0; break; }
+    }
+  }
+  // ── vertical ──
+  h.y += h.vy * dt;
+  h.onGround = false;
+  {
+    const tx0 = Math.floor((h.x - hw + 1) / T), tx1 = Math.floor((h.x + hw - 1) / T);   // body cols
+    if (h.vy >= 0) {
+      const ty = Math.floor(h.y / T);
+      for (let tx = tx0; tx <= tx1; tx++) if (tileSolid(mz, tx, ty)) { h.y = ty * T; h.vy = 0; h.onGround = true; break; }
+    } else {
+      const ty = Math.floor((h.y - h.h) / T);
+      for (let tx = tx0; tx <= tx1; tx++) if (tileSolid(mz, tx, ty)) { h.y = (ty + 1) * T + h.h; h.vy = 0; break; }
+    }
   }
 }
 
@@ -2459,23 +2576,33 @@ function update(dt) {
   h.vy = Math.min(h.vy + g * dt, C.MAX_FALL);
 
   const wasAir = !h.onGround;
-  if (Game.phase === 'traverse') collideHeroScroll(h, dt); else collideHero(h, dt);
+  if (Game.phase === 'traverse') { if (Game.terrain && Game.terrain.maze) collideHeroMaze(h, dt); else collideHeroScroll(h, dt); }
+  else collideHero(h, dt);
   // Strong-hit floor blast: landing a dive clears nearby monsters (and blasts the boss).
   if (h.strong && h.onGround && wasAir) { strongHitBlast(); h.strong = false; }
   if (wasAir && h.onGround) Game.combo = 0;   // landing ends the combo chain
 
-  // boss VOID (L2): dropping into the marked pit past the sky-climb → the boss, not death
   const lvl = Game.levelData;
-  if (Game.phase === 'traverse' && lvl && lvl.bossPit && !h.dead &&
-      h.x >= lvl.bossPit.x0 && h.x <= lvl.bossPit.x1 && h.y >= lvl.top + 8) { enterBossArena(); return; }
+  const maze = (Game.phase === 'traverse' && Game.terrain && Game.terrain.maze) ? Game.terrain : null;
+  if (maze) {
+    // ── L6 labyrinth: 2D camera follow (clamped), fall-out death, exit marker ──
+    Game.cam.x = Math.max(0, Math.min(Math.max(0, maze.width - C.W), Math.round(h.x - C.W / 2)));
+    Game.cam.y = Math.max(0, Math.min(Math.max(0, maze.height - C.H), Math.round(h.y - C.H * 0.55)));
+    if (!h.dead && h.y >= maze.deathY) heroDie();
+    else if (!h.dead && Math.abs(h.x - maze.exit.x) < 10 && h.y > maze.exit.y - 24 && h.y <= maze.exit.y + 4) onMazeExit();
+  } else {
+    // boss VOID (L2): dropping into the marked pit past the sky-climb → the boss, not death
+    if (Game.phase === 'traverse' && lvl && lvl.bossPit && !h.dead &&
+        h.x >= lvl.bossPit.x0 && h.x <= lvl.bossPit.x1 && h.y >= lvl.top + 8) { enterBossArena(); return; }
 
-  // lava death — fell into a hole or off an edge and reached the lava surface
-  if (h.y >= C.LAVA_Y) heroDie();
+    // lava death — fell into a hole or off an edge and reached the lava surface
+    if (h.y >= C.LAVA_Y) heroDie();
 
-  // scroll the camera and, on reaching the exit, lock into the boss arena
-  if (Game.phase === 'traverse') {
-    Game.cam.x = Math.max(0, Math.min(lvl.width - C.W, Math.round(h.x - C.W * 0.4)));
-    if (!lvl.bossPit && !h.dead && h.x >= lvl.exitX) { enterBossArena(); return; }   // horizontal exit (non-pit levels)
+    // scroll the camera and, on reaching the exit, lock into the boss arena
+    if (Game.phase === 'traverse') {
+      Game.cam.x = Math.max(0, Math.min(lvl.width - C.W, Math.round(h.x - C.W * 0.4)));
+      if (!lvl.bossPit && !h.dead && h.x >= lvl.exitX) { enterBossArena(); return; }   // horizontal exit (non-pit levels)
+    }
   }
 
   updatePickables(dt);
@@ -2720,8 +2847,26 @@ function segBeach(s) {                            // sandy dune with grains + a 
 }
 const SEG_RENDER = { classic: segVolcano, rooftops: segRooftops, poison: segPoison, climbing: segClimbing, wineCorks: segCorks, ropeBridge: segBridge, skyClouds: segClouds, mansion: segMansion, beach: segBeach };
 
+// Draw the L6 maze: solid tiles as chunky blocks + the exit marker. Only the tiles inside
+// the camera view are drawn. PR-E replaces the palette with the B&W high-contrast look.
+function drawMaze(mz) {
+  const T = mz.tileW, cam = Game.cam, C = CONFIG;
+  const tx0 = Math.max(0, Math.floor(cam.x / T)), tx1 = Math.min(mz.cols - 1, Math.floor((cam.x + C.W) / T));
+  const ty0 = Math.max(0, Math.floor(cam.y / T)), ty1 = Math.min(mz.rows - 1, Math.floor((cam.y + C.H) / T));
+  for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) {
+    if (mz.grid[ty * mz.cols + tx] !== MZ.WALL) continue;
+    const x = tx * T, y = ty * T;
+    ctx.fillStyle = '#2a2f3a'; ctx.fillRect(x, y, T, T);
+    ctx.fillStyle = '#3c4454'; ctx.fillRect(x, y, T, 2);
+    ctx.fillStyle = '#171b22'; ctx.fillRect(x, y + T - 2, T, 2);
+  }
+  const e = mz.exit;                                   // exit portal
+  ctx.fillStyle = '#8fd0ff'; ctx.fillRect(e.x - 6, e.y - 22, 12, 22);
+  ctx.fillStyle = '#d6f0ff'; ctx.fillRect(e.x - 6, e.y - 22, 12, 3);
+}
 function drawTerrain() {
   const ter = Game.terrain; if (!ter) return;
+  if (ter.maze) { drawMaze(ter); return; }
   const world = Game.theme.world, d = (WORLDS[world] || WORLDS.classic).deco, fn = SEG_RENDER[world];
   // Holes (gaps between segments) stay open → sky/hazard shows through.
   const segs = ter.traverse ? ter.ground : ter.segments;
@@ -3245,6 +3390,7 @@ function drawHUD() {
   // boss flag / level-progress bar (centre)
   if (Game.scene === 'PLAY') {
     if (Game.phase === 'boss') { ctx.textAlign = 'center'; ctx.fillStyle = '#e0392f'; ctx.font = '10px monospace'; ctx.fillText('◆ BOSS ◆', C.W / 2, 7); ctx.textAlign = 'left'; }
+    else if (Game.levelData && Game.levelData.maze) { ctx.textAlign = 'center'; ctx.fillStyle = '#8fd0ff'; ctx.font = '9px monospace'; ctx.fillText('◆ THE LABYRINTH ◆', C.W / 2, 7); ctx.textAlign = 'left'; }   // PR-C swaps in a keys X/N counter
     else if (Game.levelData) {
       const bw = 90, bx = (C.W - bw) / 2, by = 5, frac = Math.max(0, Math.min(1, Game.hero.x / Game.levelData.exitX));
       ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.fillRect(bx - 1, by - 1, bw + 2, 6);
@@ -3349,13 +3495,18 @@ function render() {
   }
 
   // Background stays screen-fixed (parallax 0): themed sky → backdrop → hazard band.
-  drawSky(Game.theme.sky);
-  drawWorldBackdrop(Game.theme.world);
-  drawHazard(Game.theme.world);
+  // The maze is an interior — a flat dark fill instead (PR-E gives it a B&W high-contrast look).
+  if (Game.terrain && Game.terrain.maze) {
+    ctx.fillStyle = '#0b0d14'; ctx.fillRect(0, 0, C.W, C.H);
+  } else {
+    drawSky(Game.theme.sky);
+    drawWorldBackdrop(Game.theme.world);
+    drawHazard(Game.theme.world);
+  }
 
-  // Foreground scrolls with the camera (world space).
+  // Foreground scrolls with the camera (world space). cam.y is 0 except in the L6 maze.
   ctx.save();
-  ctx.translate(-Math.round(Game.cam.x), 0);
+  ctx.translate(-Math.round(Game.cam.x), -Math.round(Game.cam.y || 0));
   drawTerrain();
   if (Game.phase === 'traverse' && Game.levelData && Game.levelData.chests) for (const ch of Game.levelData.chests) drawChest(ch);
   // Spawn box(es) — only during the boss duel; count per level (+RAGE side).
@@ -3375,7 +3526,8 @@ function render() {
   if (live) drawHUD();
 
   // Scene overlays (canvas-drawn transient screens)
-  if (Game.scene === 'INTRO') centerText([{ t: 'LEVEL ' + Game.level, big: true, color: '#f4d03f' }, { t: (WORLDS[Game.theme.world] || {}).name + ' · ' + (SKY_NAMES[Game.theme.sky] || ''), color: '#eee8d5' }, { t: 'run to the end, then fight the boss', color: '#93a1a1' }]);
+  if (Game.scene === 'INTRO' && Game.level === MAZE_LEVEL) centerText([{ t: 'LEVEL ' + Game.level, big: true, color: '#f4d03f' }, { t: 'THE LABYRINTH', color: '#eee8d5' }, { t: 'find the keys · reach the exit', color: '#93a1a1' }]);
+  else if (Game.scene === 'INTRO') centerText([{ t: 'LEVEL ' + Game.level, big: true, color: '#f4d03f' }, { t: (WORLDS[Game.theme.world] || {}).name + ' · ' + (SKY_NAMES[Game.theme.sky] || ''), color: '#eee8d5' }, { t: 'run to the end, then fight the boss', color: '#93a1a1' }]);
   else if (Game.scene === 'CLEAR') centerText([{ t: 'LEVEL CLEAR', big: true, color: '#7cb342' }].concat(Game.gainedLife ? [{ t: '★ no-hit bonus: +1 heart! ★', color: '#f4d03f' }] : [{ t: 'points ' + Game.points, color: '#93a1a1' }]));
   else if (Game.scene === 'GAMEOVER') centerText([{ t: 'GAME OVER', big: true, color: '#e0392f' }, { t: 'reached level ' + Game.level, color: '#eee8d5' }, { t: 'tap to return to title', color: '#93a1a1' }]);
   else if (Game.scene === 'VICTORY') centerText([{ t: 'VICTORY!', big: true, color: '#f4d03f' }, { t: 'you conquered the tower', color: '#eee8d5' }, { t: MODES[Game.mode].name, color: '#93a1a1' }, { t: 'tap to return to title', color: '#93a1a1' }]);
@@ -3588,6 +3740,7 @@ window.BS = {
   seed: () => Game.seed,
   reseed,
   genTerrain, genArena, genLevel, worldForLevel, HAZARD_KINDS, HAZARDS_BY_WORLD, hazardReach, surfaceAt, findSafeX,
+  genMaze, tileSolid, mazeSolidAt, mazeSurfaceAt, collideHeroMaze, MAZE_LEVEL, maxPlayableLevel, mazeExitReached: () => !!Game.mazeExitReached,
   terrain: () => Game.terrain,
   levelData: () => Game.levelData,
   phase: () => Game.phase,
