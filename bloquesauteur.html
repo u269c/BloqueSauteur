@@ -2586,8 +2586,16 @@ function update(dt) {
   const frozen = h.frozen > 0 || h.dizzy > 0;   // scream-freeze or poison-dizzy: can't act (still vulnerable)
 
   // ── Climbing (ropes/ladders/vines/chains/poles): hold ↑/↓ to climb; ←/→ to dismount ──
+  // Direction-aware selection: where two shafts stack in one column (common in the L6 maze),
+  // going DOWN grabs the shaft with room below and going UP the one with room above — so a
+  // junction is passable both ways, and holding a direction flows from one shaft onto the next.
   if (Game.phase === 'traverse' && Game.levelData.climbables && !frozen) {
-    const onClimb = Game.levelData.climbables.find((c) => Math.abs(h.x - c.x) < 8 && h.y - h.h < c.bot && h.y > c.top - 4);
+    const near = Game.levelData.climbables.filter((c) => Math.abs(h.x - c.x) < 8 && h.y - h.h < c.bot && h.y > c.top - 4);
+    let onClimb = near[0] || null;
+    if (near.length > 1) {
+      if (Input.down && !Input.jumpHeld) { const below = near.filter((c) => c.bot > h.y + 1); if (below.length) onClimb = below.reduce((b, c) => (c.bot > b.bot ? c : b)); }
+      else if (Input.jumpHeld && !Input.down) { const above = near.filter((c) => c.top < h.y - 1); if (above.length) onClimb = above.reduce((b, c) => (c.top < b.top ? c : b)); }
+    }
     if (h.climbing && (!onClimb || Input.left || Input.right)) h.climbing = false;   // dismount (fall back to normal control)
     else if (onClimb && !h.climbing && (Input.jumpHeld || Input.down)) { h.climbing = true; h.x = onClimb.x; }
     if (h.climbing && onClimb) {
