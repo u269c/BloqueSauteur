@@ -363,10 +363,11 @@ const ARENA = {
   4: { holes: 3, boxes: 1, boxSpeed: 1.3 },
   5: { holes: 3, boxes: 2, boxSpeed: 1.3 },
 };
-const ENEMY = { r: 7, speedMul: { clear: 1, red: 1.7, yellow: 1, blue: 2.4 }, bounce: 300, jumpImpulse: 205, gravity: 900, leapV: 250, leapVX: 118 };
+const ENEMY = { r: 7, speedMul: { clear: 1, red: 1.7, yellow: 1, blue: 2.4, orange: 1 }, bounce: 300, jumpImpulse: 205, gravity: 900, leapV: 250, leapVX: 118 };
 // How many stomps each type takes to kill. After the FIRST hit, red/yellow/blue turn
 // bloodshot: +20% speed and they hunt the hero (like blue donuts). clear dies in one.
-const ENEMY_HITS = { clear: 1, red: 2, yellow: 2, blue: 3 };
+// orange = the L6 maze mini-boss: blue-style homing, but 6 hits and it comes in a pair.
+const ENEMY_HITS = { clear: 1, red: 2, yellow: 2, blue: 3, orange: 6 };
 const ENRAGE_SPEEDUP = 1.2, ENEMY_HIT_IFRAME = 0.5;
 const BOSS = {
   r: 17, hits: 3, iframe: 0.9, returnSpeed: 95, jumpImpulse: 250,
@@ -926,12 +927,12 @@ function genMaze(level, seed) {
   const exit = { x: (exitCx * cw + cw - 3) * T + T / 2, y: floorRowOf(exitCy) * T };
   // Locked doors along the solution path + one diamond key per door, each key placed so it's
   // reachable BEFORE the door it opens (keeps the maze solvable — proven by mazeSolvable).
-  const { doors, keys } = placeMazeGates({ grid, links, rand, CW, CH, cw, ch, T, cols, startV, exitV, floorRowOf });
+  const { doors, keys, minibosses } = placeMazeGates({ grid, links, rand, CW, CH, cw, ch, T, cols, startV, exitV, floorRowOf });
   return {
     maze: true, level, seed: seed >>> 0,
     cols, rows, tileW: T, width: cols * T, height: rows * T, grid,
     climbables, hazards: [], chests: [], floats: [], enemies: [],
-    doors, keys, keysNeeded: doors.length, minibosses: [],
+    doors, keys, keysNeeded: doors.length, minibosses,
     cells: { CW, CH, cw, ch, links },
     spawn, exit,
     deathY: rows * T + 2 * T,                                // below the (solid) bottom border — a safety net for future pits
@@ -967,17 +968,20 @@ function placeMazeGates(P) {
   const dtr = new Array(CW * CH).fill(0), seen2 = new Array(CW * CH).fill(false), q2 = [startV]; seen2[startV] = true;
   while (q2.length) { const v = q2.shift(); for (const n of nbrs(v)) if (!seen2[n]) { seen2[n] = true; dtr[n] = dtr[v] + (doorEdge.has(v + '-' + n) ? 1 : 0); q2.push(n); } }
   const isLeaf = (v) => { const lk = links[v]; return lk && (lk & (lk - 1)) === 0; };
-  // key k goes in a cell in zone k (dtr === k), preferring a dead-end, never start/exit/reused
-  const keys = [], used = new Set([startV, exitV]);
+  // key k goes in a cell in zone k (dtr === k), preferring a dead-end, never start/exit/reused.
+  // Each key is LOCKED and guarded by a mini-boss PAIR (two orange homers) placed in its room;
+  // defeat both to free the key. (PR-D spawns the pair from `minibosses`.)
+  const keys = [], minibosses = [], used = new Set([startV, exitV]);
   for (let k = 0; k < gates.length; k++) {
     const zone = []; for (let v = 0; v < CW * CH; v++) if (seen[v] && dtr[v] === k && !used.has(v)) zone.push(v);
     const leaves = zone.filter(isLeaf), pool = leaves.length ? leaves : zone;
     const cell = pool.length ? pool[Math.floor(rand() * pool.length)] : path[gates[k]];
     used.add(cell);
-    const { cx, cy } = cellOf(cell), fr = floorRowOf(cy), ktx = cx * cw + 2;
-    keys.push({ id: k, tx: ktx, ty: fr - 1, x: ktx * T + T / 2, y: fr * T, taken: false });
+    const { cx, cy } = cellOf(cell), fr = floorRowOf(cy), ktx = cx * cw + 2, mid = cx * cw + Math.floor(cw / 2);
+    keys.push({ id: k, tx: ktx, ty: fr - 1, x: ktx * T + T / 2, y: fr * T, taken: false, locked: true });
+    minibosses.push({ pairId: k, keyId: k, freed: false, a: { x: (mid - 1) * T, y: fr * T }, b: { x: (mid + 2) * T, y: fr * T } });
   }
-  return { doors, keys };
+  return { doors, keys, minibosses };
 }
 // Physics- AND lock/key-aware reachability net. Repeatedly floods the tiles the hero can
 // occupy — WALK (±1 same row onto a standable tile), a 1-tile step up/down, CLIMB (a ladder
@@ -1182,7 +1186,12 @@ function buildMazeLevel() {
   Game.keys = 0;                                        // diamond keys held (per maze run)
   Game.hitThisLevel = false;
   Game.enemies = []; Game.pickups = []; Game.boss = null; Game.bossActive = false;
-  Game.spawnT = 1e9;                                   // no ambient spawns in the maze (its foes are placed in PR-D)
+  Game.spawnT = 1e9;                                   // no ambient spawns in the maze — its foes are the placed mini-boss pairs
+  for (const mb of Game.levelData.minibosses) {        // spawn each guarding pair of orange homers
+    mb.freed = false;
+    Game.enemies.push(makeOrange(mb.a.x, mb.a.y, mb.pairId, mb.keyId));
+    Game.enemies.push(makeOrange(mb.b.x, mb.b.y, mb.pairId, mb.keyId));
+  }
   const sp = Game.levelData.spawn;
   Object.assign(Game.hero, {
     x: sp.x, y: sp.y, vx: 0, vy: 0,
@@ -1199,7 +1208,7 @@ function onMazeExit() {
 // L6 interactions: grab diamond keys on contact; walking into a locked door with a key in
 // hand spends it and opens the door (carving its tiles so the grid lets you through).
 function updateMazeInteract(mz, h) {
-  for (const k of (mz.keys || [])) if (!k.taken && Math.abs(h.x - k.x) < 12 && h.y > k.y - 22 && h.y - h.h < k.y + 4) {
+  for (const k of (mz.keys || [])) if (!k.taken && !k.locked && Math.abs(h.x - k.x) < 12 && h.y > k.y - 22 && h.y - h.h < k.y + 4) {
     k.taken = true; Game.keys = (Game.keys | 0) + 1;
     Audio.sfx('coin'); addFloater(k.x, k.y - 22, '◆ KEY', '#8fd0ff'); spawnBurst(k.x, k.y - 8, '#8fd0ff', 10); shake(2);
   }
@@ -1208,6 +1217,91 @@ function updateMazeInteract(mz, h) {
     for (const [tx, ty] of d.tiles) mz.grid[ty * mz.cols + tx] = MZ.EMPTY;
     Audio.sfx('lifeUp'); addFloater(d.x + d.w / 2, d.y - 6, 'UNLOCKED', '#f4d03f'); spawnBurst(d.x + d.w / 2, d.y + d.h / 2, '#f4d03f', 14); shake(3);
     break;   // one door per frame
+  }
+}
+// An orange maze mini-boss: a beefy (r 9) blue-style homer, 6 hits, part of a pair.
+function makeOrange(x, y, pairId, keyId) {
+  return {
+    x, y, vx: 0, vy: 0, r: 9, type: 'orange', side: 'maze', dir: 1, baseSpeed: 44,
+    onGround: false, leaping: false, alive: true, trail: [], trailT: 0, patrol: false, homing: true,
+    jumpT: 0, spikes: 7, gaze: -1, hits: ENEMY_HITS.orange, maxHits: ENEMY_HITS.orange, bloodshot: false, hitT: 0,
+    pairId, keyId, role: 'idle', tele: 0, thrown: false, throwT: 0, throwVx: 0, throwVy: 0, throwCd: 3 + Game.rand() * 2,
+  };
+}
+// Fire a mini-boss as a projectile toward the hero's current position.
+function launchMazeThrow(e, h) {
+  const spd = 250, dx = h.x - e.x, dy = (h.y - h.h / 2) - e.y, d = Math.hypot(dx, dy) || 1;
+  e.thrown = true; e.throwT = 0.8; e.tele = 0; e.role = 'idle';
+  e.throwVx = dx / d * spd; e.throwVy = dy / d * spd;
+  Audio.sfx('bossSpawn'); spawnBurst(e.x, e.y - e.r, '#ff8a2c', 10); shake(3);
+}
+// L6 mini-boss AI (tile-grid): orange pairs home toward the hero on their floor, take 6
+// stomps each, and periodically hurl one partner at the hero (telegraphed). Defeating both
+// of a pair frees its diamond key. Kept separate from the heightfield updateEnemies.
+function updateMazeEnemies(dt) {
+  const mz = Game.levelData, h = Game.hero, T = mz.tileW, G = 900;
+  const pairs = {};
+  for (const e of Game.enemies) if (e.alive) (pairs[e.pairId] = pairs[e.pairId] || []).push(e);
+
+  for (const e of Game.enemies) {
+    if (!e.alive) continue;
+    if (e.hitT > 0) e.hitT -= dt;
+    e.trailT -= dt; if (e.trailT <= 0) { e.trail.push({ x: e.x, y: e.y }); if (e.trail.length > 6) e.trail.shift(); e.trailT = 0.05; }
+
+    if (e.thrown) {                                 // ── in-flight projectile ──
+      e.x += e.throwVx * dt; e.y += e.throwVy * dt; e.throwT -= dt;
+      if (h.ghost <= 0 && h.dodgeT <= 0 && h.hurt <= 0 && Math.abs(h.x - e.x) < e.r + 7 && Math.abs((h.y - h.h / 2) - e.y) < e.r + 9) { heroHurt(e.x > h.x); e.thrown = false; }
+      else if (e.throwT <= 0 || mazeSolidAt(mz, e.x + Math.sign(e.throwVx) * e.r, e.y) || mazeSolidAt(mz, e.x, e.y)) { e.thrown = false; e.vx = 0; e.vy = 0; }
+      continue;
+    }
+
+    e.vy += G * dt;
+    if (e.tele > 0) {                               // ── winding up a throw (frozen) ──
+      e.tele -= dt; e.vx = 0;
+      if (e.tele <= 0) { if (e.role === 'proj') { launchMazeThrow(e, h); continue; } e.role = 'idle'; }
+    } else {
+      if (e.onGround) { e.dir = h.x < e.x ? -1 : 1; e.vx = e.dir * (e.baseSpeed * (e.bloodshot ? ENRAGE_SPEEDUP : 1)); }
+      if (e.throwCd > 0) e.throwCd -= dt;
+    }
+
+    // horizontal tile collision
+    e.x += e.vx * dt;
+    { const ty0 = Math.floor((e.y - e.r * 2 + 1) / T), ty1 = Math.floor((e.y - 1) / T);
+      if (e.vx > 0) { const tx = Math.floor((e.x + e.r) / T); for (let ty = ty0; ty <= ty1; ty++) if (tileSolid(mz, tx, ty)) { e.x = tx * T - e.r; e.vx = 0; break; } }
+      else if (e.vx < 0) { const tx = Math.floor((e.x - e.r) / T); for (let ty = ty0; ty <= ty1; ty++) if (tileSolid(mz, tx, ty)) { e.x = (tx + 1) * T + e.r; e.vx = 0; break; } } }
+    // vertical tile collision (feet at e.y)
+    e.y += e.vy * dt; e.onGround = false;
+    { const tx0 = Math.floor((e.x - e.r + 1) / T), tx1 = Math.floor((e.x + e.r - 1) / T), ty = Math.floor(e.y / T);
+      if (e.vy >= 0) for (let tx = tx0; tx <= tx1; tx++) if (tileSolid(mz, tx, ty)) { e.y = ty * T; e.vy = 0; e.onGround = true; break; } }
+
+    // hero interaction: stomp (6 hits) from above, or side contact hurts
+    const etop = e.y - e.r * 2, hbot = h.y, hl = h.x - h.w / 2, hr = h.x + h.w / 2, htop = h.y - h.h, el = e.x - e.r, er = e.x + e.r;
+    if (hr > el - 3 && hl < er + 3 && hbot > etop && htop < e.y) {
+      if (h.vy > 0 && h.y < e.y - e.r * 0.4) { h.vy = -ENEMY.bounce; h.onGround = false; h.jumping = true; if (e.hitT <= 0) hitEnemy(e); }
+      else if (h.hurt <= 0 && h.ghost <= 0 && h.dodgeT <= 0) { if (h.shieldT > 0) { hitEnemy(e); hitEnemy(e); h.shieldT = 0; } else heroHurt(e.x > h.x); }
+    }
+  }
+
+  // co-op throw: a full-strength pair, off cooldown, with the hero in range → wind up + throw
+  for (const id in pairs) {
+    const pr = pairs[id]; if (pr.length < 2) continue;
+    const a = pr[0], b = pr[1];
+    if (a.throwCd <= 0 && b.throwCd <= 0 && a.tele <= 0 && b.tele <= 0 && !a.thrown && !b.thrown && a.onGround && b.onGround
+        && Math.abs(h.x - (a.x + b.x) / 2) < 150 && Math.abs(h.y - a.y) < 72) {
+      const thrower = Math.abs(a.x - h.x) <= Math.abs(b.x - h.x) ? a : b, proj = thrower === a ? b : a;
+      thrower.role = 'thrower'; proj.role = 'proj';
+      a.tele = b.tele = 0.6; a.throwCd = b.throwCd = 4.5 + Game.rand() * 2;
+    }
+  }
+
+  // defeating BOTH of a pair frees its diamond key
+  for (const mb of mz.minibosses) {
+    if (mb.freed) continue;
+    if (!Game.enemies.some((e) => e.pairId === mb.pairId && e.alive)) {
+      mb.freed = true;
+      const key = mz.keys.find((k) => k.id === mb.keyId);
+      if (key) { key.locked = false; addFloater(key.x, key.y - 26, '◆ KEY FREED', '#8fd0ff'); spawnBurst(key.x, key.y - 8, '#8fd0ff', 18); shake(5); Audio.sfx('lifeUp'); }
+    }
   }
 }
 function buildLevel() {
@@ -2405,6 +2499,8 @@ function hitEnemy(e) {
   spawnBurst(e.x, e.y - e.r, ENEMY_COL[e.type] || '#fff', 6);
   Audio.sfx('bossHit'); shake(2);
 }
+// Enemy tick dispatch: the L6 maze runs its own tile-grid mini-boss AI; L1-5 use the heightfield one.
+function stepEnemies(dt) { if (Game.terrain && Game.terrain.maze) updateMazeEnemies(dt); else updateEnemies(dt); }
 function updateEnemies(dt) {
   const C = CONFIG, ter = Game.terrain, L = LEVELS[Game.level] || LEVELS[1], h = Game.hero;
 
@@ -2675,7 +2771,7 @@ function update(dt) {
       h.y += ((Input.jumpHeld ? -1 : 0) + (Input.down ? 1 : 0)) * CLIMB_SPEED * dt;
       if (h.y <= onClimb.top) { h.y = onClimb.top; h.climbing = false; h.onGround = true; }   // reached the top perch
       if (h.y > onClimb.bot) h.y = onClimb.bot;                                               // can't go below the ground
-      updatePickables(dt); updateHazards(); updateEnemies(dt); updateBoss(dt);
+      updatePickables(dt); updateHazards(); stepEnemies(dt); updateBoss(dt);
       return;
     }
   }
@@ -2687,7 +2783,7 @@ function update(dt) {
     h.dodgeT = holding ? Math.max(0, h.dodgeT - dt) : 0;   // release ends it early
     h.vx = 0; h.vy = 0;                       // frozen — no fall while dodging
     if (h.dodgeT <= 0) { h.dodgeT = 0; h.dodgeCd = C.DODGE_CD; }
-    updateEnemies(dt);
+    stepEnemies(dt);
     updateBoss(dt);
     return;
   }
@@ -2764,7 +2860,7 @@ function update(dt) {
 
   updatePickables(dt);
   updateHazards();
-  updateEnemies(dt);
+  stepEnemies(dt);
   updateBoss(dt);
 }
 
@@ -3033,14 +3129,22 @@ function drawMazeDoor(d) {
   const cx = d.x + d.w / 2, cy = d.y + d.h / 2, s = 4;   // diamond keyhole
   ctx.fillStyle = '#d6c0ff'; ctx.beginPath(); ctx.moveTo(cx, cy - s); ctx.lineTo(cx + s, cy); ctx.lineTo(cx, cy + s); ctx.lineTo(cx - s, cy); ctx.closePath(); ctx.fill();
 }
-// A diamond key, glinting, hovering just above the floor.
+// A diamond key. Locked = dim + caged (defeat the guarding pair to free it); free = glowing.
 function drawMazeKey(k) {
   const bob = Math.sin(Game.t * 3 + k.x) * 2, cx = k.x, cy = k.y - 12 + bob, s = 5;
   ctx.save();
-  ctx.fillStyle = `rgba(143,208,255,${0.25 + 0.15 * (0.5 + 0.5 * Math.sin(Game.t * 5))})`;
-  ctx.beginPath(); ctx.arc(cx, cy, 9, 0, 7); ctx.fill();   // glow
-  ctx.fillStyle = '#8fd0ff'; ctx.beginPath(); ctx.moveTo(cx, cy - s); ctx.lineTo(cx + s, cy); ctx.lineTo(cx, cy + s); ctx.lineTo(cx - s, cy); ctx.closePath(); ctx.fill();
-  ctx.fillStyle = '#eaf6ff'; ctx.beginPath(); ctx.moveTo(cx - 1.5, cy - s + 1.5); ctx.lineTo(cx + 1, cy - 1); ctx.lineTo(cx - 1.5, cy + 1); ctx.closePath(); ctx.fill();   // facet highlight
+  if (k.locked) {
+    ctx.globalAlpha = 0.55;
+    ctx.fillStyle = '#5f7182'; ctx.beginPath(); ctx.moveTo(cx, cy - s); ctx.lineTo(cx + s, cy); ctx.lineTo(cx, cy + s); ctx.lineTo(cx - s, cy); ctx.closePath(); ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = 'rgba(160,170,185,0.75)'; ctx.lineWidth = 1;   // cage bars
+    ctx.beginPath(); ctx.moveTo(cx - 6, cy - 7); ctx.lineTo(cx - 6, cy + 7); ctx.moveTo(cx, cy - 8); ctx.lineTo(cx, cy + 8); ctx.moveTo(cx + 6, cy - 7); ctx.lineTo(cx + 6, cy + 7); ctx.stroke();
+  } else {
+    ctx.fillStyle = `rgba(143,208,255,${0.25 + 0.15 * (0.5 + 0.5 * Math.sin(Game.t * 5))})`;
+    ctx.beginPath(); ctx.arc(cx, cy, 9, 0, 7); ctx.fill();   // glow
+    ctx.fillStyle = '#8fd0ff'; ctx.beginPath(); ctx.moveTo(cx, cy - s); ctx.lineTo(cx + s, cy); ctx.lineTo(cx, cy + s); ctx.lineTo(cx - s, cy); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#eaf6ff'; ctx.beginPath(); ctx.moveTo(cx - 1.5, cy - s + 1.5); ctx.lineTo(cx + 1, cy - 1); ctx.lineTo(cx - 1.5, cy + 1); ctx.closePath(); ctx.fill();   // facet highlight
+  }
   ctx.restore();
 }
 function drawTerrain() {
@@ -3411,7 +3515,7 @@ function drawHero() {
   ctx.globalAlpha = 1;
 }
 
-const ENEMY_COL = { clear: '#dfe6e9', red: '#e0392f', yellow: '#f4d03f', rainbow: '#fff', volcano: '#c1121f', blue: '#2a7fd0' };
+const ENEMY_COL = { clear: '#dfe6e9', red: '#e0392f', yellow: '#f4d03f', rainbow: '#fff', volcano: '#c1121f', blue: '#2a7fd0', orange: '#ff8a2c' };
 
 function drawDonut(cx, cy, r, type, spikes, gaze, alpha, phase, blood) {
   const col = ENEMY_COL[type] || '#fff';
@@ -3441,12 +3545,19 @@ function drawDonut(cx, cy, r, type, spikes, gaze, alpha, phase, blood) {
 function drawEnemies() {
   const phase = Game.t * 6;
   for (const e of Game.enemies) {
-    // fading motion trail
+    // fading motion trail (longer + brighter for a thrown mini-boss)
+    const trailA = e.thrown ? 0.22 : 1;
     for (let i = 0; i < e.trail.length; i++) {
-      const tp = e.trail[i], a = 0.06 + 0.12 * (i / e.trail.length);
-      drawDonut(tp.x, tp.y - e.r, e.r * 0.85, e.type, e.spikes, e.gaze, a, phase, e.bloodshot);
+      const tp = e.trail[i], a = (0.06 + 0.12 * (i / e.trail.length)) * (e.thrown ? 2.2 : 1);
+      drawDonut(tp.x, tp.y - e.r, e.r * 0.85, e.type, e.spikes, e.gaze, a, phase + (e.thrown ? Game.t * 30 : 0), e.bloodshot);
     }
-    drawDonut(e.x, e.y - e.r, e.r, e.type, e.spikes, e.gaze, 1, phase, e.bloodshot);
+    // telegraph flash while winding up a throw
+    if (e.tele > 0) {
+      const p = 0.5 + 0.5 * Math.sin(Game.t * 30);
+      ctx.fillStyle = `rgba(255,220,140,${0.2 + 0.4 * p})`;
+      ctx.beginPath(); ctx.arc(e.x, e.y - e.r, e.r + 5 + p * 3, 0, Math.PI * 2); ctx.fill();
+    }
+    drawDonut(e.x, e.y - e.r, e.r, e.type, e.spikes, e.gaze, 1, phase + (e.thrown ? Game.t * 40 : 0), e.bloodshot);
   }
 }
 
@@ -3925,7 +4036,7 @@ window.BS = {
   reseed,
   genTerrain, genArena, genLevel, worldForLevel, HAZARD_KINDS, HAZARDS_BY_WORLD, hazardReach, surfaceAt, findSafeX,
   genMaze, mazeSolvable, MAZE_CELLS, tileSolid, mazeSolidAt, mazeSurfaceAt, collideHeroMaze, MAZE_LEVEL, maxPlayableLevel, mazeExitReached: () => !!Game.mazeExitReached,
-  mazeKeys: () => Game.keys | 0, updateMazeInteract,
+  mazeKeys: () => Game.keys | 0, updateMazeInteract, updateMazeEnemies, makeOrange, minibosses: () => (Game.levelData ? Game.levelData.minibosses : []),
   terrain: () => Game.terrain,
   levelData: () => Game.levelData,
   phase: () => Game.phase,
