@@ -178,6 +178,43 @@ test.describe('L6 maze — seeded generation', () => {
     expect(r.stayedUp).toBe(true);   // the bug: hero fell straight back down the shaft
   });
 
+  test('two stacked shafts in one column: you can descend past the junction (and ascend back)', async ({ page }) => {
+    await openGame(page); await enterPlayPanel(page, 0);
+    const r = await page.evaluate(() => {
+      const T = 16, cols = 6, rows = 18;
+      const grid = new Uint8Array(cols * rows);
+      const S = (tx, ty) => { grid[ty * cols + tx] = 1; };
+      for (let ty = 0; ty < rows; ty++) { S(0, ty); S(cols - 1, ty); }
+      for (let tx = 0; tx < cols; tx++) { S(tx, 0); S(tx, rows - 1); }
+      for (const fr of [4, 9, 14]) for (let tx = 1; tx < cols - 1; tx++) S(tx, fr);   // three floors
+      // two shafts stacked in column 3: upper (rows 4→9) + lower (rows 9→14), meeting at the mid floor
+      const mz = {
+        maze: true, level: 6, seed: 1, cols, rows, tileW: T, width: cols * T, height: rows * T, grid,
+        climbables: [{ x: 3.5 * T, top: 4 * T, bot: 9 * T, kind: 'pole' }, { x: 3.5 * T, top: 9 * T, bot: 14 * T, kind: 'ladder' }],
+        hazards: [], chests: [], floats: [], enemies: [], doors: [], keysNeeded: 0, minibosses: [],
+        spawn: { x: 1.5 * T, y: 9 * T }, exit: { x: 4 * T, y: 4 * T }, deathY: rows * T,
+      };
+      const st = window.BS.state(); st.terrain = mz; st.levelData = mz; st.phase = 'traverse'; st.scene = 'PLAY'; st.paused = false;
+      window.BS.freeze(true); window.BS.Input.reset();
+      const h = window.BS.hero();
+      // stand at the mid-floor junction, hold DOWN → must descend PAST it toward the bottom floor
+      Object.assign(h, { x: 3.5 * T, y: 9 * T, vx: 0, vy: 0, climbing: false, onGround: true });
+      window.BS.Input.press('down', true);
+      for (let i = 0; i < 240; i++) window.BS.step(1 / 120);
+      window.BS.Input.reset();
+      const wentDown = h.y > 9 * T + 40;
+      // from the bottom floor, hold UP → must ascend PAST the junction toward the top
+      Object.assign(h, { x: 3.5 * T, y: 14 * T, vx: 0, vy: 0, climbing: false, onGround: true });
+      window.BS.Input.press('jump', true);
+      for (let i = 0; i < 360; i++) window.BS.step(1 / 120);
+      window.BS.Input.reset();
+      const wentUp = h.y < 9 * T - 40;
+      return { wentDown, wentUp, y: h.y };
+    });
+    expect(r.wentDown).toBe(true);   // the bug: grabbing the upper shaft clamped you at the junction
+    expect(r.wentUp).toBe(true);
+  });
+
   test('the 2D camera follows the hero in X and Y and clamps to the maze bounds', async ({ page }) => {
     await enterMaze(page);
     const r = await page.evaluate(() => {
