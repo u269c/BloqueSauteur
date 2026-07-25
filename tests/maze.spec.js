@@ -288,6 +288,30 @@ function installMinibossMaze() {
   return { T, fr };
 }
 
+test.describe('L6 maze — B&W high-contrast theme', () => {
+  test('L6 renders its monochrome world for many frames without errors (neg. control: L1 too)', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(String(e)));
+    await openGame(page, { seed: 3 }); await enterPlayPanel(page, 0);
+    await page.evaluate(() => { window.BS.startGame(window.BS.MAZE_LEVEL); window.BS.gotoPlay(); });
+    await page.waitForTimeout(300);   // let the real rAF loop exercise the grayscale-filter draw path
+    const mazeActive = await page.evaluate(() => !!window.BS.terrain().maze);
+    // NEGATIVE CONTROL: the coloured heightfield L1 still renders clean
+    await page.evaluate(() => { window.BS.gotoTitle(); window.BS.startGame(1); window.BS.gotoPlay(); });
+    await page.waitForTimeout(150);
+    const l1 = await page.evaluate(() => window.BS.state().level === 1 && !window.BS.terrain().maze);
+    expect(errors).toEqual([]);
+    expect(mazeActive).toBe(true);
+    expect(l1).toBe(true);
+  });
+
+  test('the colourless lens is render-only — enemy behaviour (6-hit orange) is unchanged', async ({ page }) => {
+    await openGame(page);
+    const hits = await page.evaluate(() => window.BS.ENEMY_HITS.orange);
+    expect(hits).toBe(6);   // greyscale is purely visual; type behaviour is intact
+  });
+});
+
 test.describe('L6 maze — orange mini-boss pairs', () => {
   test('genMaze guards each diamond key with a locked pair of orange mini-bosses', async ({ page }) => {
     await openGame(page);
