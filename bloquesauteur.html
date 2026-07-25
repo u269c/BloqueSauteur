@@ -867,30 +867,100 @@ function mazeSurfaceAt(mz, x, fromY) {
   return null;
 }
 
-// Hand-authored deterministic test maze (PR-A): a bordered room larger than the screen in
-// BOTH dimensions, with a floor, an interior wall, a ceiling overhang and a bottom pit —
-// enough to exercise 4-side collision, 2D-camera clamping and fall-out death. Seeded
-// generation replaces this body in PR-B; the descriptor shape stays fixed.
+// Seeded maze generation (PR-B). A recursive-backtracker (DFS) carves a PERFECT maze — a
+// spanning tree, so exactly one route between any two cells and lots of dead-ends — over a
+// coarse cell grid. Each cell becomes an open room whose bottom row is a solid floor;
+// links are carved as either a floor-level DOORWAY (horizontal neighbours share a floor →
+// walkable) or a vertical CLIMB-SHAFT (a rope/ladder between the two floors). Because every
+// link is walk- or climb-traversable and cells all sit on a floor, the maze is solvable BY
+// CONSTRUCTION — mazeSolvable() is the net that proves it (tested across seeds).
+const MAZE_CELLS = { CW: 6, CH: 4, cw: 8, ch: 7 };   // cells across/down · tiles per cell (48 × 28 world)
 function genMaze(level, seed) {
-  const T = CONFIG.TILE, cols = 44, rows = 30;              // 704 × 480 world (≈1.5 × 1.8 screens)
-  const grid = new Uint8Array(cols * rows);
-  const set = (tx, ty, v) => { if (tx >= 0 && tx < cols && ty >= 0 && ty < rows) grid[ty * cols + tx] = v; };
-  for (let tx = 0; tx < cols; tx++) { set(tx, 0, MZ.WALL); set(tx, rows - 1, MZ.WALL); }   // solid border
-  for (let ty = 0; ty < rows; ty++) { set(0, ty, MZ.WALL); set(cols - 1, ty, MZ.WALL); }
-  const FR = rows - 3;                                       // main floor, two rows above the bottom
-  for (let tx = 1; tx < cols - 1; tx++) set(tx, FR, MZ.WALL);
-  for (let ty = FR - 4; ty < FR; ty++) set(14, ty, MZ.WALL); // interior wall — blocks a straight run
-  for (let ty = 1; ty <= 6; ty++) { set(24, ty, MZ.WALL); set(25, ty, MZ.WALL); }   // ceiling overhang
-  for (let tx = 30; tx <= 33; tx++) { set(tx, FR, MZ.EMPTY); set(tx, rows - 1, MZ.EMPTY); }   // bottom pit
-  const floorY = FR * T;
+  const T = CONFIG.TILE, { CW, CH, cw, ch } = MAZE_CELLS;
+  const cols = CW * cw, rows = CH * ch;
+  const rand = mulberry32(((seed >>> 0) ^ 0x6a5e00 ^ (level * 0x9e37)) >>> 0);
+  const grid = new Uint8Array(cols * rows).fill(MZ.WALL);   // start solid; carve empties
+  const carve = (tx, ty) => { if (tx >= 0 && tx < cols && ty >= 0 && ty < rows) grid[ty * cols + tx] = MZ.EMPTY; };
+  const cellV = (cx, cy) => cy * CW + cx;
+  const floorRowOf = (cy) => (cy + 1) * ch - 1;             // the cell band's bottom row = its floor
+
+  // ── 1. DFS spanning tree over the cell graph ──
+  const visited = new Array(CW * CH).fill(false);
+  const links = new Array(CW * CH).fill(0);                 // per-cell open-side bitmask (N=1,E=2,S=4,W=8)
+  const DIRS = [[0, -1, 1, 4], [1, 0, 2, 8], [0, 1, 4, 1], [-1, 0, 8, 2]];   // dx,dy,bit,opposite-bit
+  const startCell = [0, CH - 1];                            // bottom-left
+  const stack = [startCell]; visited[cellV(0, CH - 1)] = true;
+  while (stack.length) {
+    const [cx, cy] = stack[stack.length - 1];
+    const order = [0, 1, 2, 3];
+    for (let i = 3; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); const t = order[i]; order[i] = order[j]; order[j] = t; }
+    let advanced = false;
+    for (const di of order) {
+      const [dx, dy, bit, opp] = DIRS[di], nx = cx + dx, ny = cy + dy;
+      if (nx < 0 || nx >= CW || ny < 0 || ny >= CH || visited[cellV(nx, ny)]) continue;
+      links[cellV(cx, cy)] |= bit; links[cellV(nx, ny)] |= opp;
+      visited[cellV(nx, ny)] = true; stack.push([nx, ny]); advanced = true; break;
+    }
+    if (!advanced) stack.pop();
+  }
+
+  // ── 2. Carve room interiors + link openings ──
+  const climbables = [];
+  for (let cy = 0; cy < CH; cy++) for (let cx = 0; cx < CW; cx++) {
+    const x0 = cx * cw, y0 = cy * ch, fr = floorRowOf(cy), lk = links[cellV(cx, cy)];
+    for (let ty = Math.max(1, y0); ty < fr; ty++) for (let tx = x0 + 1; tx < x0 + cw - 1; tx++) carve(tx, ty);   // open room above its floor (keep row 0 as a ceiling)
+    if (lk & 2) { const wx = x0 + cw - 1; for (let ty = fr - 3; ty < fr; ty++) { carve(wx, ty); carve(wx + 1, ty); } }   // EAST doorway (3 tiles tall, at floor level)
+    if (lk & 4) {                                            // SOUTH link → a climb-shaft down to the cell below
+      const sx = x0 + Math.floor(cw / 2), belowFr = floorRowOf(cy + 1);
+      for (let ty = fr; ty < belowFr; ty++) carve(sx, ty);   // punch the shaft (upper floor tile stays for standing; ladder overlays it)
+      climbables.push({ x: sx * T + T / 2, top: fr * T, bot: belowFr * T, kind: CLIMB_KINDS[(cx + cy * 3 + level) % CLIMB_KINDS.length] });
+    }
+  }
+  // solid outer border (containment + a clean visible frame)
+  for (let tx = 0; tx < cols; tx++) { grid[tx] = MZ.WALL; grid[(rows - 1) * cols + tx] = MZ.WALL; }
+  for (let ty = 0; ty < rows; ty++) { grid[ty * cols] = MZ.WALL; grid[ty * cols + cols - 1] = MZ.WALL; }
+
+  const spawn = { x: (0 * cw + 1.5) * T, y: floorRowOf(CH - 1) * T };       // bottom-left room floor
+  const exitCx = CW - 1, exitCy = 0;                                        // top-right room floor
+  // exit sits near the room's right side, off the shaft column (x0+cw/2) so it's on solid floor
+  const exit = { x: (exitCx * cw + cw - 3) * T + T / 2, y: floorRowOf(exitCy) * T };
   return {
     maze: true, level, seed: seed >>> 0,
     cols, rows, tileW: T, width: cols * T, height: rows * T, grid,
-    climbables: [], hazards: [], chests: [], floats: [], enemies: [],
+    climbables, hazards: [], chests: [], floats: [], enemies: [],
     doors: [], keysNeeded: 0, minibosses: [],
-    spawn: { x: 2.5 * T, y: floorY }, exit: { x: (cols - 3) * T, y: floorY },
-    deathY: rows * T,                                        // feet past the grid bottom = fell out
+    cells: { CW, CH, cw, ch, links },
+    spawn, exit,
+    deathY: rows * T + 2 * T,                                // below the (solid) bottom border — a safety net for future pits
   };
+}
+// Physics-aware reachability net: from the spawn tile, flood every tile the hero can occupy
+// via WALK (±1 same row onto a standable tile), a 1-tile step up/down, CLIMB (±1 along a
+// climbable column) and a gravity DROP to the floor below — the exact move-set the maze is
+// built from. Returns true iff the exit tile is reachable. (Jump arcs aren't modelled
+// because the critical path never needs one — doorways share a floor, shafts have ladders.)
+function mazeSolvable(mz) {
+  const T = mz.tileW, cols = mz.cols, rows = mz.rows;
+  const empty = (tx, ty) => !tileSolid(mz, tx, ty);
+  const climbAt = (tx, ty) => mz.climbables.some((c) => Math.floor(c.x / T) === tx && ty * T >= c.top - T && ty * T <= c.bot);
+  const standable = (tx, ty) => empty(tx, ty) && (tileSolid(mz, tx, ty + 1) || climbAt(tx, ty));
+  const start = { tx: Math.floor(mz.spawn.x / T), ty: Math.round(mz.spawn.y / T) - 1 };
+  const goal = { tx: Math.floor(mz.exit.x / T), ty: Math.round(mz.exit.y / T) - 1 };
+  const seen = new Set(), q = [start]; seen.add(start.ty * cols + start.tx);
+  const push = (tx, ty) => { if (tx < 0 || tx >= cols || ty < 0 || ty >= rows || !empty(tx, ty)) return; const k = ty * cols + tx; if (seen.has(k)) return; seen.add(k); q.push({ tx, ty }); };
+  while (q.length) {
+    const { tx, ty } = q.pop();
+    if (tx === goal.tx && ty === goal.ty) return true;
+    for (const dx of [-1, 1]) {
+      if (standable(tx + dx, ty)) push(tx + dx, ty);                          // walk
+      if (empty(tx + dx, ty) && standable(tx + dx, ty - 1)) push(tx + dx, ty - 1);   // step up a ledge
+      if (standable(tx + dx, ty + 1)) push(tx + dx, ty + 1);                  // step down a ledge
+    }
+    if (climbAt(tx, ty)) { if (climbAt(tx, ty - 1) || standable(tx, ty - 1)) push(tx, ty - 1); if (empty(tx, ty + 1)) push(tx, ty + 1); }   // climb
+    let dy = ty; while (dy + 1 < rows && empty(tx, dy + 1) && !climbAt(tx, dy)) dy++;   // gravity drop
+    if (standable(tx, dy)) push(tx, dy);
+  }
+  return false;
 }
 // Ground top at world-x for a traversal level (floats excluded), or null over a hole.
 function groundTopAt(lvl, x) { for (const g of lvl.ground) if (x >= g.x0 && x < g.x1) return g.top; return null; }
@@ -2860,6 +2930,7 @@ function drawMaze(mz) {
     ctx.fillStyle = '#3c4454'; ctx.fillRect(x, y, T, 2);
     ctx.fillStyle = '#171b22'; ctx.fillRect(x, y + T - 2, T, 2);
   }
+  for (const c of mz.climbables) drawClimbable(c);      // rope/ladder climb-shafts
   const e = mz.exit;                                   // exit portal
   ctx.fillStyle = '#8fd0ff'; ctx.fillRect(e.x - 6, e.y - 22, 12, 22);
   ctx.fillStyle = '#d6f0ff'; ctx.fillRect(e.x - 6, e.y - 22, 12, 3);
@@ -3740,7 +3811,7 @@ window.BS = {
   seed: () => Game.seed,
   reseed,
   genTerrain, genArena, genLevel, worldForLevel, HAZARD_KINDS, HAZARDS_BY_WORLD, hazardReach, surfaceAt, findSafeX,
-  genMaze, tileSolid, mazeSolidAt, mazeSurfaceAt, collideHeroMaze, MAZE_LEVEL, maxPlayableLevel, mazeExitReached: () => !!Game.mazeExitReached,
+  genMaze, mazeSolvable, MAZE_CELLS, tileSolid, mazeSolidAt, mazeSurfaceAt, collideHeroMaze, MAZE_LEVEL, maxPlayableLevel, mazeExitReached: () => !!Game.mazeExitReached,
   terrain: () => Game.terrain,
   levelData: () => Game.levelData,
   phase: () => Game.phase,
