@@ -263,3 +263,82 @@ test.describe('L6 maze — seeded generation', () => {
     expect(r.camY).toBe(0);
   });
 });
+
+test.describe('L6 maze — doors + diamond keys', () => {
+  test('genMaze places locked doors, one diamond key each, all closed in the grid', async ({ page }) => {
+    await openGame(page);
+    const r = await page.evaluate(() => {
+      let allMatch = true, anyDoors = false;
+      for (let s = 1; s <= 20; s++) {
+        const mz = window.BS.genMaze(6, s * 7919 >>> 0);
+        if (mz.doors.length !== mz.keys.length || mz.keysNeeded !== mz.doors.length) allMatch = false;
+        if (mz.doors.length > 0) anyDoors = true;
+        for (const d of mz.doors) for (const [tx, ty] of d.tiles) if (mz.grid[ty * mz.cols + tx] !== 1) allMatch = false;   // closed = WALL
+      }
+      return { allMatch, anyDoors };
+    });
+    expect(r.allMatch).toBe(true);
+    expect(r.anyDoors).toBe(true);
+  });
+
+  test('every seed is solvable WITH doors; stripping the keys makes it unsolvable (neg. control)', async ({ page }) => {
+    await openGame(page);
+    const r = await page.evaluate(() => {
+      let solvable = true, keylessBlocks = true, checkedKeyless = 0;
+      for (let s = 1; s <= 30; s++) {
+        const seed = s * 2654435761 >>> 0;
+        if (!window.BS.mazeSolvable(window.BS.genMaze(6, seed))) solvable = false;
+        const noKeys = window.BS.genMaze(6, seed);
+        if (noKeys.doors.length > 0) { checkedKeyless++; noKeys.keys = []; if (window.BS.mazeSolvable(noKeys)) keylessBlocks = false; }
+      }
+      return { solvable, keylessBlocks, checkedKeyless };
+    });
+    expect(r.solvable).toBe(true);
+    expect(r.checkedKeyless).toBeGreaterThan(0);
+    expect(r.keylessBlocks).toBe(true);   // the doors genuinely gate the only path
+  });
+
+  test('a closed door blocks the hero; a key opens it and lets you through (neg. control)', async ({ page }) => {
+    await openGame(page); await enterPlayPanel(page, 0);
+    const r = await page.evaluate(() => {
+      const T = 16, cols = 16, rows = 8, fr = 6;
+      const grid = new Uint8Array(cols * rows);
+      const S = (tx, ty) => { grid[ty * cols + tx] = 1; };
+      for (let ty = 0; ty < rows; ty++) { S(0, ty); S(cols - 1, ty); }
+      for (let tx = 0; tx < cols; tx++) { S(tx, 0); S(tx, rows - 1); }
+      for (let tx = 1; tx < cols - 1; tx++) S(tx, fr);           // one floor
+      const doorTiles = []; for (let ty = fr - 3; ty < fr; ty++) { S(8, ty); doorTiles.push([8, ty]); }   // a closed door at col 8
+      const mz = {
+        maze: true, level: 6, seed: 1, cols, rows, tileW: T, width: cols * T, height: rows * T, grid,
+        climbables: [], hazards: [], chests: [], floats: [], enemies: [],
+        doors: [{ id: 0, tiles: doorTiles, x: 8 * T, y: (fr - 3) * T, w: 1 * T, h: 3 * T, open: false }],
+        keys: [{ id: 0, tx: 3, ty: fr - 1, x: 3 * T + T / 2, y: fr * T, taken: false }], keysNeeded: 1, minibosses: [],
+        spawn: { x: 2 * T, y: fr * T }, exit: { x: 13 * T, y: fr * T }, deathY: rows * T,
+      };
+      const st = window.BS.state(); st.terrain = mz; st.levelData = mz; st.phase = 'traverse'; st.scene = 'PLAY'; st.paused = false; st.keys = 0;
+      window.BS.freeze(true); window.BS.Input.reset();
+      const h = window.BS.hero();
+      // NEGATIVE CONTROL: no key → walking right is blocked before the door
+      Object.assign(h, { x: 6 * T, y: fr * T, vx: 0, vy: 0, onGround: true, climbing: false });
+      window.BS.Input.press('right', true);
+      for (let i = 0; i < 180; i++) window.BS.step(1 / 120);
+      window.BS.Input.reset();
+      const blockedNoKey = h.x < 8 * T && st.keys === 0;
+      // collect the key
+      Object.assign(h, { x: 3 * T + T / 2, y: fr * T, vx: 0, vy: 0 });
+      for (let i = 0; i < 5; i++) window.BS.step(1 / 120);
+      const gotKey = st.keys >= 1;
+      // walk into the door → it unlocks and the hero passes to the right room
+      Object.assign(h, { x: 6 * T, y: fr * T, vx: 0, vy: 0 });
+      window.BS.Input.press('right', true);
+      for (let i = 0; i < 300; i++) window.BS.step(1 / 120);
+      window.BS.Input.reset();
+      return { blockedNoKey, gotKey, doorOpen: mz.doors[0].open, passed: h.x > 9 * T, keysLeft: st.keys };
+    });
+    expect(r.blockedNoKey).toBe(true);   // negative control
+    expect(r.gotKey).toBe(true);
+    expect(r.doorOpen).toBe(true);
+    expect(r.passed).toBe(true);         // walked through after unlocking
+    expect(r.keysLeft).toBe(0);          // the key was spent
+  });
+});

@@ -921,50 +921,107 @@ function genMaze(level, seed) {
   for (let ty = 0; ty < rows; ty++) { grid[ty * cols] = MZ.WALL; grid[ty * cols + cols - 1] = MZ.WALL; }
 
   const spawn = { x: (0 * cw + 1.5) * T, y: floorRowOf(CH - 1) * T };       // bottom-left room floor
-  const exitCx = CW - 1, exitCy = 0;                                        // top-right room floor
+  const startV = cellV(0, CH - 1), exitCx = CW - 1, exitCy = 0, exitV = cellV(exitCx, exitCy);
   // exit sits near the room's right side, off the shaft column (x0+cw/2) so it's on solid floor
   const exit = { x: (exitCx * cw + cw - 3) * T + T / 2, y: floorRowOf(exitCy) * T };
+  // Locked doors along the solution path + one diamond key per door, each key placed so it's
+  // reachable BEFORE the door it opens (keeps the maze solvable — proven by mazeSolvable).
+  const { doors, keys } = placeMazeGates({ grid, links, rand, CW, CH, cw, ch, T, cols, startV, exitV, floorRowOf });
   return {
     maze: true, level, seed: seed >>> 0,
     cols, rows, tileW: T, width: cols * T, height: rows * T, grid,
     climbables, hazards: [], chests: [], floats: [], enemies: [],
-    doors: [], keysNeeded: 0, minibosses: [],
+    doors, keys, keysNeeded: doors.length, minibosses: [],
     cells: { CW, CH, cw, ch, links },
     spawn, exit,
     deathY: rows * T + 2 * T,                                // below the (solid) bottom border — a safety net for future pits
   };
 }
-// Physics-aware reachability net: from the spawn tile, flood every tile the hero can occupy
-// via WALK (±1 same row onto a standable tile), a 1-tile step up/down, CLIMB (±1 along a
-// climbable column) and a gravity DROP to the floor below — the exact move-set the maze is
-// built from. Returns true iff the exit tile is reachable. (Jump arcs aren't modelled
-// because the critical path never needs one — doorways share a floor, shafts have ladders.)
+// Gate the solution path with up to 3 locked doors and place one diamond key per door. Each
+// door sits on a horizontal doorway of the start→exit path; its key goes in the "zone" just
+// before it (a dead-end room when one is available, else a path room), so you always hold
+// enough keys by the time you reach a door. Doors are closed by writing WALL over the doorway
+// tiles (opened later by carving them back). PR-D hands these keys to the orange mini-bosses.
+function placeMazeGates(P) {
+  const { grid, links, rand, CW, CH, cw, ch, T, cols, startV, exitV, floorRowOf } = P;
+  const cellV = (cx, cy) => cy * CW + cx, cellOf = (v) => ({ cx: v % CW, cy: Math.floor(v / CW) });
+  const nbrs = (v) => { const { cx, cy } = cellOf(v), lk = links[v], o = []; if (lk & 1) o.push(cellV(cx, cy - 1)); if (lk & 2) o.push(cellV(cx + 1, cy)); if (lk & 4) o.push(cellV(cx, cy + 1)); if (lk & 8) o.push(cellV(cx - 1, cy)); return o; };
+  // BFS tree from start → parents → the unique start→exit path
+  const parent = new Array(CW * CH).fill(-1), seen = new Array(CW * CH).fill(false), q = [startV]; seen[startV] = true;
+  while (q.length) { const v = q.shift(); for (const n of nbrs(v)) if (!seen[n]) { seen[n] = true; parent[n] = v; q.push(n); } }
+  const path = []; for (let v = exitV; v !== -1; v = parent[v]) path.push(v); path.reverse();
+  // horizontal steps on the path are the doorway gate candidates
+  const hSteps = []; for (let i = 0; i < path.length - 1; i++) if (cellOf(path[i]).cy === cellOf(path[i + 1]).cy) hSteps.push(i);
+  const D = Math.min(3, hSteps.length);
+  const gateAt = []; for (let k = 0; k < D; k++) gateAt.push(hSteps[Math.floor((k + 0.5) / D * hSteps.length)]);
+  const gates = [...new Set(gateAt)].sort((a, b) => a - b);
+  // build the doors + remember which tree edges they sit on
+  const doors = [], doorEdge = new Set();
+  for (const i of gates) {
+    const a = cellOf(path[i]), b = cellOf(path[i + 1]), leftcx = Math.min(a.cx, b.cx), fr = floorRowOf(a.cy), c0 = leftcx * cw + cw - 1, tiles = [];
+    for (let ty = fr - 3; ty < fr; ty++) for (const tx of [c0, c0 + 1]) { grid[ty * cols + tx] = MZ.WALL; tiles.push([tx, ty]); }
+    doors.push({ id: doors.length, tiles, x: c0 * T, y: (fr - 3) * T, w: 2 * T, h: 3 * T, open: false });
+    doorEdge.add(path[i] + '-' + path[i + 1]); doorEdge.add(path[i + 1] + '-' + path[i]);
+  }
+  // doorsToReach[v] = doors crossed from start to v (over the tree)
+  const dtr = new Array(CW * CH).fill(0), seen2 = new Array(CW * CH).fill(false), q2 = [startV]; seen2[startV] = true;
+  while (q2.length) { const v = q2.shift(); for (const n of nbrs(v)) if (!seen2[n]) { seen2[n] = true; dtr[n] = dtr[v] + (doorEdge.has(v + '-' + n) ? 1 : 0); q2.push(n); } }
+  const isLeaf = (v) => { const lk = links[v]; return lk && (lk & (lk - 1)) === 0; };
+  // key k goes in a cell in zone k (dtr === k), preferring a dead-end, never start/exit/reused
+  const keys = [], used = new Set([startV, exitV]);
+  for (let k = 0; k < gates.length; k++) {
+    const zone = []; for (let v = 0; v < CW * CH; v++) if (seen[v] && dtr[v] === k && !used.has(v)) zone.push(v);
+    const leaves = zone.filter(isLeaf), pool = leaves.length ? leaves : zone;
+    const cell = pool.length ? pool[Math.floor(rand() * pool.length)] : path[gates[k]];
+    used.add(cell);
+    const { cx, cy } = cellOf(cell), fr = floorRowOf(cy), ktx = cx * cw + 2;
+    keys.push({ id: k, tx: ktx, ty: fr - 1, x: ktx * T + T / 2, y: fr * T, taken: false });
+  }
+  return { doors, keys };
+}
+// Physics- AND lock/key-aware reachability net. Repeatedly floods the tiles the hero can
+// occupy — WALK (±1 same row onto a standable tile), a 1-tile step up/down, CLIMB (a ladder
+// links its two perches) and a gravity DROP — collecting diamond keys and noting which closed
+// doors touch the reachable region. When it holds an unspent key against a reachable door, it
+// "opens" one and re-floods. Returns true iff the exit becomes reachable (with no doors/keys
+// it's just a plain flood). This proves the maze is solvable given the key placement.
 function mazeSolvable(mz) {
   const T = mz.tileW, cols = mz.cols, rows = mz.rows;
-  const empty = (tx, ty) => !tileSolid(mz, tx, ty);
-  const standable = (tx, ty) => empty(tx, ty) && tileSolid(mz, tx, ty + 1);
-  // A ladder bidirectionally links its two perches (the standable body-tiles at each end);
-  // the top floor tile between them is solid, so this link — not tile-by-tile climbing — is
-  // how the hero crosses it (matches the in-game climb clamping to the top surface).
-  const ladders = mz.climbables.map((c) => ({ cx: Math.floor(c.x / T), a: Math.round(c.top / T) - 1, b: Math.round(c.bot / T) - 1 }));
+  const doorOwner = new Map();   // "tx,ty" → door index
+  (mz.doors || []).forEach((d, i) => d.tiles.forEach(([tx, ty]) => doorOwner.set(tx + ',' + ty, i)));
+  const keyTiles = (mz.keys || []).map((k) => k.tx + ',' + k.ty);
+  const ladders = (mz.climbables || []).map((c) => ({ cx: Math.floor(c.x / T), a: Math.round(c.top / T) - 1, b: Math.round(c.bot / T) - 1 }));
   const start = { tx: Math.floor(mz.spawn.x / T), ty: Math.round(mz.spawn.y / T) - 1 };
   const goal = { tx: Math.floor(mz.exit.x / T), ty: Math.round(mz.exit.y / T) - 1 };
-  const seen = new Set(), q = [start]; seen.add(start.ty * cols + start.tx);
-  const push = (tx, ty) => { if (tx < 0 || tx >= cols || ty < 0 || ty >= rows || !empty(tx, ty)) return; const k = ty * cols + tx; if (seen.has(k)) return; seen.add(k); q.push({ tx, ty }); };
-  while (q.length) {
-    const { tx, ty } = q.pop();
-    if (tx === goal.tx && ty === goal.ty) return true;
-    for (const dx of [-1, 1]) {
-      if (standable(tx + dx, ty)) push(tx + dx, ty);                          // walk
-      if (empty(tx + dx, ty) && standable(tx + dx, ty - 1)) push(tx + dx, ty - 1);   // step up a ledge
-      if (standable(tx + dx, ty + 1)) push(tx + dx, ty + 1);                  // step down a ledge
+  const opened = new Set();
+  const solid = (tx, ty) => {
+    if (tx < 0 || tx >= cols || ty < 0) return true; if (ty >= rows) return false;
+    if (mz.grid[ty * cols + tx] !== MZ.WALL) return false;
+    const o = doorOwner.get(tx + ',' + ty); return !(o !== undefined && opened.has(o));   // an opened door tile is passable
+  };
+  const empty = (tx, ty) => !solid(tx, ty), standable = (tx, ty) => empty(tx, ty) && solid(tx, ty + 1);
+  for (let guard = 0; guard <= (mz.doors || []).length; guard++) {
+    const seen = new Set(), stack = [start]; seen.add(start.ty * cols + start.tx);
+    const keysGot = new Set(), adjDoors = new Set(); let reached = false;
+    const push = (tx, ty) => { if (tx < 0 || tx >= cols || ty < 0 || ty >= rows || !empty(tx, ty)) return; const k = ty * cols + tx; if (seen.has(k)) return; seen.add(k); stack.push({ tx, ty }); };
+    while (stack.length) {
+      const { tx, ty } = stack.pop();
+      if (tx === goal.tx && ty === goal.ty) reached = true;
+      const ki = keyTiles.indexOf(tx + ',' + ty); if (ki >= 0) keysGot.add(ki);
+      for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) { const o = doorOwner.get((tx + dx) + ',' + (ty + dy)); if (o !== undefined && !opened.has(o)) adjDoors.add(o); }
+      for (const dx of [-1, 1]) {
+        if (standable(tx + dx, ty)) push(tx + dx, ty);                        // walk
+        if (empty(tx + dx, ty) && standable(tx + dx, ty - 1)) push(tx + dx, ty - 1);   // step up
+        if (standable(tx + dx, ty + 1)) push(tx + dx, ty + 1);               // step down
+      }
+      for (const L of ladders) { if (tx === L.cx && ty === L.a) push(L.cx, L.b); if (tx === L.cx && ty === L.b) push(L.cx, L.a); }
+      let dy = ty; while (dy + 1 < rows && empty(tx, dy + 1)) dy++;           // gravity drop
+      if (standable(tx, dy)) push(tx, dy);
     }
-    for (const L of ladders) {                                               // climb a shaft (perch ↔ perch)
-      if (tx === L.cx && ty === L.a) push(L.cx, L.b);
-      if (tx === L.cx && ty === L.b) push(L.cx, L.a);
-    }
-    let dy = ty; while (dy + 1 < rows && empty(tx, dy + 1)) dy++;             // gravity drop to the floor below
-    if (standable(tx, dy)) push(tx, dy);
+    if (reached) return true;
+    if (keysGot.size - opened.size <= 0) return false;                        // no spare key
+    let openedOne = false; for (const d of adjDoors) if (!opened.has(d)) { opened.add(d); openedOne = true; break; }
+    if (!openedOne) return false;                                            // no reachable door to spend a key on
   }
   return false;
 }
@@ -1122,6 +1179,7 @@ function buildMazeLevel() {
   Game.terrain = Game.levelData;
   Game.cam.x = 0; Game.cam.y = 0;
   Game.mazeExitReached = false;
+  Game.keys = 0;                                        // diamond keys held (per maze run)
   Game.hitThisLevel = false;
   Game.enemies = []; Game.pickups = []; Game.boss = null; Game.bossActive = false;
   Game.spawnT = 1e9;                                   // no ambient spawns in the maze (its foes are placed in PR-D)
@@ -1137,6 +1195,20 @@ function onMazeExit() {
   if (Game.mazeExitReached) return;
   Game.mazeExitReached = true;
   addFloater(Game.hero.x, Game.hero.y - 20, 'EXIT!', '#8fd0ff');
+}
+// L6 interactions: grab diamond keys on contact; walking into a locked door with a key in
+// hand spends it and opens the door (carving its tiles so the grid lets you through).
+function updateMazeInteract(mz, h) {
+  for (const k of (mz.keys || [])) if (!k.taken && Math.abs(h.x - k.x) < 12 && h.y > k.y - 22 && h.y - h.h < k.y + 4) {
+    k.taken = true; Game.keys = (Game.keys | 0) + 1;
+    Audio.sfx('coin'); addFloater(k.x, k.y - 22, '◆ KEY', '#8fd0ff'); spawnBurst(k.x, k.y - 8, '#8fd0ff', 10); shake(2);
+  }
+  if (Game.keys > 0) for (const d of (mz.doors || [])) if (!d.open && h.x + h.w / 2 > d.x - 4 && h.x - h.w / 2 < d.x + d.w + 4 && h.y > d.y && h.y - h.h < d.y + d.h) {
+    d.open = true; Game.keys--;
+    for (const [tx, ty] of d.tiles) mz.grid[ty * mz.cols + tx] = MZ.EMPTY;
+    Audio.sfx('lifeUp'); addFloater(d.x + d.w / 2, d.y - 6, 'UNLOCKED', '#f4d03f'); spawnBurst(d.x + d.w / 2, d.y + d.h / 2, '#f4d03f', 14); shake(3);
+    break;   // one door per frame
+  }
 }
 function buildLevel() {
   // A level begins in the scrolling TRAVERSE phase (the boss arena comes at the exit).
@@ -2674,6 +2746,7 @@ function update(dt) {
     Game.cam.y = Math.max(0, Math.min(Math.max(0, maze.height - C.H), Math.round(h.y - C.H * 0.55)));
     if (!h.dead && h.y >= maze.deathY) heroDie();
     else if (!h.dead && Math.abs(h.x - maze.exit.x) < 10 && h.y > maze.exit.y - 24 && h.y <= maze.exit.y + 4) onMazeExit();
+    if (!h.dead) updateMazeInteract(maze, h);
   } else {
     // boss VOID (L2): dropping into the marked pit past the sky-climb → the boss, not death
     if (Game.phase === 'traverse' && lvl && lvl.bossPit && !h.dead &&
@@ -2945,9 +3018,30 @@ function drawMaze(mz) {
     ctx.fillStyle = '#171b22'; ctx.fillRect(x, y + T - 2, T, 2);
   }
   for (const c of mz.climbables) drawClimbable(c);      // rope/ladder climb-shafts
+  for (const d of (mz.doors || [])) if (!d.open) drawMazeDoor(d);
+  for (const k of (mz.keys || [])) if (!k.taken) drawMazeKey(k);
   const e = mz.exit;                                   // exit portal
+  const gl = 0.5 + 0.5 * Math.sin(Game.t * 4);
   ctx.fillStyle = '#8fd0ff'; ctx.fillRect(e.x - 6, e.y - 22, 12, 22);
-  ctx.fillStyle = '#d6f0ff'; ctx.fillRect(e.x - 6, e.y - 22, 12, 3);
+  ctx.fillStyle = `rgba(214,240,255,${0.5 + 0.5 * gl})`; ctx.fillRect(e.x - 6, e.y - 22, 12, 3);
+}
+// A locked door: a barred gate filling the doorway, with a glowing diamond keyhole.
+function drawMazeDoor(d) {
+  ctx.fillStyle = '#6b4f8a'; ctx.fillRect(d.x, d.y, d.w, d.h);
+  ctx.fillStyle = '#8a6bb0'; for (let yy = d.y + 2; yy < d.y + d.h; yy += 5) ctx.fillRect(d.x + 1, yy, d.w - 2, 2);   // bars
+  ctx.fillStyle = '#4a3568'; ctx.fillRect(d.x, d.y, 2, d.h); ctx.fillRect(d.x + d.w - 2, d.y, 2, d.h);
+  const cx = d.x + d.w / 2, cy = d.y + d.h / 2, s = 4;   // diamond keyhole
+  ctx.fillStyle = '#d6c0ff'; ctx.beginPath(); ctx.moveTo(cx, cy - s); ctx.lineTo(cx + s, cy); ctx.lineTo(cx, cy + s); ctx.lineTo(cx - s, cy); ctx.closePath(); ctx.fill();
+}
+// A diamond key, glinting, hovering just above the floor.
+function drawMazeKey(k) {
+  const bob = Math.sin(Game.t * 3 + k.x) * 2, cx = k.x, cy = k.y - 12 + bob, s = 5;
+  ctx.save();
+  ctx.fillStyle = `rgba(143,208,255,${0.25 + 0.15 * (0.5 + 0.5 * Math.sin(Game.t * 5))})`;
+  ctx.beginPath(); ctx.arc(cx, cy, 9, 0, 7); ctx.fill();   // glow
+  ctx.fillStyle = '#8fd0ff'; ctx.beginPath(); ctx.moveTo(cx, cy - s); ctx.lineTo(cx + s, cy); ctx.lineTo(cx, cy + s); ctx.lineTo(cx - s, cy); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#eaf6ff'; ctx.beginPath(); ctx.moveTo(cx - 1.5, cy - s + 1.5); ctx.lineTo(cx + 1, cy - 1); ctx.lineTo(cx - 1.5, cy + 1); ctx.closePath(); ctx.fill();   // facet highlight
+  ctx.restore();
 }
 function drawTerrain() {
   const ter = Game.terrain; if (!ter) return;
@@ -3475,7 +3569,12 @@ function drawHUD() {
   // boss flag / level-progress bar (centre)
   if (Game.scene === 'PLAY') {
     if (Game.phase === 'boss') { ctx.textAlign = 'center'; ctx.fillStyle = '#e0392f'; ctx.font = '10px monospace'; ctx.fillText('◆ BOSS ◆', C.W / 2, 7); ctx.textAlign = 'left'; }
-    else if (Game.levelData && Game.levelData.maze) { ctx.textAlign = 'center'; ctx.fillStyle = '#8fd0ff'; ctx.font = '9px monospace'; ctx.fillText('◆ THE LABYRINTH ◆', C.W / 2, 7); ctx.textAlign = 'left'; }   // PR-C swaps in a keys X/N counter
+    else if (Game.levelData && Game.levelData.maze) {
+      const mz = Game.levelData, doorsLeft = mz.doors.filter((d) => !d.open).length;
+      ctx.textAlign = 'center'; ctx.fillStyle = '#8fd0ff'; ctx.font = '9px monospace';
+      ctx.fillText('◆ ' + (Game.keys | 0) + '   DOORS ' + doorsLeft, C.W / 2, 7);
+      ctx.textAlign = 'left';
+    }
     else if (Game.levelData) {
       const bw = 90, bx = (C.W - bw) / 2, by = 5, frac = Math.max(0, Math.min(1, Game.hero.x / Game.levelData.exitX));
       ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.fillRect(bx - 1, by - 1, bw + 2, 6);
@@ -3826,6 +3925,7 @@ window.BS = {
   reseed,
   genTerrain, genArena, genLevel, worldForLevel, HAZARD_KINDS, HAZARDS_BY_WORLD, hazardReach, surfaceAt, findSafeX,
   genMaze, mazeSolvable, MAZE_CELLS, tileSolid, mazeSolidAt, mazeSurfaceAt, collideHeroMaze, MAZE_LEVEL, maxPlayableLevel, mazeExitReached: () => !!Game.mazeExitReached,
+  mazeKeys: () => Game.keys | 0, updateMazeInteract,
   terrain: () => Game.terrain,
   levelData: () => Game.levelData,
   phase: () => Game.phase,
