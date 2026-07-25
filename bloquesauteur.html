@@ -330,12 +330,12 @@ const LEVELS = {
   3: { types: ['clear', 'red', 'yellow'], spawnEvery: 2.0, speed: 26, maxAlive: 6, boss: 'yellow'  },
   4: { types: ['clear', 'red', 'yellow'], spawnEvery: 1.4, speed: 32, maxAlive: 7, boss: 'rainbow' },
   5: { types: ['clear', 'red', 'yellow'], spawnEvery: 1.3, speed: 34, maxAlive: 8, boss: 'volcano' },
+  6: { types: ['clear', 'red', 'yellow'], spawnEvery: 1.2, speed: 36, maxAlive: 9, boss: 'shadow'  },   // the evil-hero finale
 };
-const LAST_LEVEL = 5;
-// Level 6 — "THE LABYRINTH" — is a full 2D grid maze on a second, tile-grid collision
-// engine (see genMaze / collideHeroMaze). It's not part of the campaign progression yet
-// (LAST_LEVEL is still 5, so clearing L5 still ends the game); until the finale is wired,
-// it's reachable only via DEV mode. maxPlayableLevel() is the DEV level ceiling.
+const LAST_LEVEL = 6;
+// Level 6 — "THE LABYRINTH" — is the finale: a full 2D grid maze on a second, tile-grid
+// collision engine (see genMaze / collideHeroMaze), ending in the evil-hero boss duel.
+// Clearing it wins the game. maxPlayableLevel() is the DEV level ceiling.
 const MAZE_LEVEL = 6;
 function maxPlayableLevel() { return Math.max(LAST_LEVEL, MAZE_LEVEL); }
 // v2.0 side-scroll: per-level count of holes + one-way jump-up floats along the run
@@ -362,6 +362,7 @@ const ARENA = {
   3: { holes: 2, boxes: 1, boxSpeed: 1 },
   4: { holes: 3, boxes: 1, boxSpeed: 1.3 },
   5: { holes: 3, boxes: 2, boxSpeed: 1.3 },
+  6: { holes: 3, boxes: 2, boxSpeed: 1.4 },   // evil-hero arena: reinforcements pour in
 };
 const ENEMY = { r: 7, speedMul: { clear: 1, red: 1.7, yellow: 1, blue: 2.4, orange: 1 }, bounce: 300, jumpImpulse: 205, gravity: 900, leapV: 250, leapVX: 118 };
 // How many stomps each type takes to kill. After the FIRST hit, red/yellow/blue turn
@@ -373,16 +374,16 @@ const BOSS = {
   r: 17, hits: 3, iframe: 0.9, returnSpeed: 95, jumpImpulse: 250,
   freeze: 1.5, screamWarn: 1.5, screamDur: 2.0, screamRadius: 240,   // shorter stun; 1.5s shake warning; avoidable past ½ screen
 
-  charge:   { clear: 55, red: 108, yellow: 82, rainbow: 122, volcano: 100 },   // charge speed per level boss
-  idleWait: { clear: 1.2, red: 0.9, yellow: 0.9, rainbow: 0.7, volcano: 0.7 }, // pause between attacks
+  charge:   { clear: 55, red: 108, yellow: 82, rainbow: 122, volcano: 100, shadow: 132 },   // charge speed per level boss
+  idleWait: { clear: 1.2, red: 0.9, yellow: 0.9, rainbow: 0.7, volcano: 0.7, shadow: 0.6 }, // pause between attacks
 };
 
 // Difficulty modes (chosen on the title screen). Health is measured in hearts
 // (fractional). bossHits is indexed by level; L5 volcano boss is a fixed 12 (2 lives).
 const MODES = {
-  easy:   { name: 'EASY',      hitDamage: 0,    knockOnHit: false, levelHeart: true,  spawners: 1, spawnMul: 1.0, pointPenalty: 0, bossHits: { 1: 3, 2: 3, 3: 3, 4: 3, 5: 12 }, musicRate: 1.0,  musicWave: null },
-  normal: { name: 'NORMAL',    hitDamage: 0.25, knockOnHit: true,  levelHeart: true,  spawners: 1, spawnMul: 1.2, pointPenalty: 0, bossHits: { 1: 3, 2: 4, 3: 5, 4: 6, 5: 12 }, musicRate: 1.14, musicWave: null },
-  rage:   { name: 'RAGE MODE', hitDamage: 0.5,  knockOnHit: true,  levelHeart: false, spawners: 2, spawnMul: 1.5, pointPenalty: 1, bossHits: { 1: 6, 2: 8, 3: 10, 4: 12, 5: 12 }, musicRate: 1.3, musicWave: 'sawtooth' },
+  easy:   { name: 'EASY',      hitDamage: 0,    knockOnHit: false, levelHeart: true,  spawners: 1, spawnMul: 1.0, pointPenalty: 0, bossHits: { 1: 3, 2: 3, 3: 3, 4: 3, 5: 12, 6: 36 }, musicRate: 1.0,  musicWave: null },
+  normal: { name: 'NORMAL',    hitDamage: 0.25, knockOnHit: true,  levelHeart: true,  spawners: 1, spawnMul: 1.2, pointPenalty: 0, bossHits: { 1: 3, 2: 4, 3: 5, 4: 6, 5: 12, 6: 36 }, musicRate: 1.14, musicWave: null },
+  rage:   { name: 'RAGE MODE', hitDamage: 0.5,  knockOnHit: true,  levelHeart: false, spawners: 2, spawnMul: 1.5, pointPenalty: 1, bossHits: { 1: 6, 2: 8, 3: 10, 4: 12, 5: 12, 6: 36 }, musicRate: 1.3, musicWave: 'sawtooth' },
 };
 
 const LEVEL_NAMES = { 1: 'THE SHALLOWS', 2: 'BROKEN GROUND', 3: 'THE GAPS', 4: 'INFERNO', 5: 'THE VOLCANO', 6: 'THE LABYRINTH' };
@@ -1199,11 +1200,12 @@ function buildMazeLevel() {
     airJumps: 0, shieldT: 0, shieldCd: 0, dodgeT: 0, dodgeCd: 0, strong: false, frozen: 0, dizzy: 0, bigJump: 0, climbing: false,
   });
 }
-// Reaching the maze exit — the evil-hero boss duel is wired in PR-F; for now it's a marker.
+// Reaching the maze exit locks the camera into the shadow arena — the evil-hero boss duel.
 function onMazeExit() {
   if (Game.mazeExitReached) return;
   Game.mazeExitReached = true;
-  addFloater(Game.hero.x, Game.hero.y - 20, 'EXIT!', '#8fd0ff');
+  addFloater(Game.hero.x, Game.hero.y - 20, 'THE SHADOW AWAITS', '#e0392f');
+  enterBossArena();
 }
 // L6 interactions: grab diamond keys on contact; walking into a locked door with a key in
 // hand spends it and opens the door (carving its tiles so the grid lets you through).
@@ -1337,7 +1339,7 @@ function enterBossArena() {
   const C = CONFIG;
   Game.phase = 'boss';
   Game.terrain = genArena(Game.level, Game.seed);
-  Game.cam.x = 0;
+  Game.cam.x = 0; Game.cam.y = 0;   // leave the maze's 2D camera behind
   Game.enemies = [];
   Game.pickups = [];
   const sx = C.PLAT_X0 + 30, sy = surfaceAt(Game.terrain, sx) ?? C.PLAT_Y;
@@ -2608,13 +2610,14 @@ function activateBoss() {
     hits: 0, maxHits, state: 'enter', stateT: 0, onGround: false,
     iframe: 0, alive: true, startX: C.PLAT_X1 - 34, gaze: -1, jumpT: 0.5,
     feint: false, spikes: (type === 'rainbow' || type === 'volcano') ? 7 : 5,
-    lives: type === 'volcano' ? 2 : 1, enraged: false, canScream: type === 'volcano', screamT: 2.5,
+    lives: type === 'volcano' ? 2 : 1, enraged: false, canScream: type === 'volcano' || type === 'shadow', screamT: 2.5,
+    tpGone: false,   // shadow boss: invisible mid-teleport
   };
   Audio.sfx('bossSpawn'); Audio.playMusic('boss'); shake(6);
 }
 
 function bossHit(b, n) {
-  if (!b.alive || b.iframe > 0) return;
+  if (!b.alive || b.iframe > 0 || b.tpGone) return;   // untouchable mid-teleport
   b.hits += (n || 1); b.iframe = BOSS.iframe; b.vy = -130; b.state = 'return';
   Audio.sfx('bossHit'); spawnBurst(b.x, b.y - b.r, ENEMY_COL[b.type] || '#fff', 14); shake(4);
   if (b.hits >= b.maxHits) {
@@ -2668,6 +2671,10 @@ function updateBoss(dt) {
         if (b.canScream) { b.screamT -= dt; }
         if (b.stateT <= 0) {
           if (b.canScream && b.screamT <= 0) { b.state = 'shriek'; b.stateT = BOSS.screamWarn; b.screamT = 4 + Game.rand() * 3; }   // wind-up first (warning)
+          else if (b.type === 'shadow') {
+            if (Game.rand() < 0.45) { b.state = 'teleport'; b.stateT = 0.55; b.tpGone = false; }   // vanish → reappear by the hero
+            else { b.state = 'telegraph'; b.stateT = 0.5; b.feint = Game.rand() < 0.3; }           // wind-up → charge/leap (or feint)
+          }
           else if (b.type === 'rainbow' || b.type === 'volcano') { b.state = 'telegraph'; b.stateT = 0.6; b.feint = Game.rand() < 0.5; }
           else { b.state = 'charge'; b.jumpT = 0.4; }
         }
@@ -2685,6 +2692,17 @@ function updateBoss(dt) {
       b.stateT -= dt;
       if (b.stateT <= 0) { b.state = 'charge'; b.jumpT = 0.35; }
       break;
+    case 'teleport':                          // shadow: telegraph in place, vanish, reappear beside the hero, strike
+      b.stateT -= dt;
+      if (b.stateT < 0.22) b.tpGone = true;   // gone (untouchable + invisible) in the final beat
+      if (b.stateT <= 0) {
+        const nx = h.x + (Game.rand() < 0.5 ? -42 : 42);
+        b.x = Math.max(C.PLAT_X0 + b.r, Math.min(C.PLAT_X1 - b.r, nx));
+        b.y = C.SPAWN_Y + 16; b.vy = 0; b.onGround = false; b.tpGone = false;
+        b.state = 'charge'; b.jumpT = 0.28;
+        Audio.sfx('bossSpawn'); spawnBurst(b.x, b.y, '#e0392f', 22); shake(6);
+      }
+      break;
     case 'telegraph':                         // L4/L5 wind-up (may be a feint)
       b.stateT -= dt;
       if (b.stateT <= 0) { if (b.feint) { b.state = 'feint'; b.stateT = 0.22; } else { b.state = 'charge'; b.jumpT = 0.4; } }
@@ -2695,7 +2713,7 @@ function updateBoss(dt) {
       break;
     case 'charge':
       b.x -= spd * dt;
-      if (b.type === 'yellow' || b.type === 'volcano' || (b.type === 'rainbow' && phase2)) {   // yellow/volcano (& rainbow p2) jump while charging
+      if (b.type === 'yellow' || b.type === 'volcano' || b.type === 'shadow' || (b.type === 'rainbow' && phase2)) {   // yellow/volcano/shadow (& rainbow p2) leap while charging
         if (b.onGround) { b.jumpT -= dt; if (b.jumpT <= 0) { b.vy = -BOSS.jumpImpulse; b.onGround = false; b.jumpT = 0.6; } }
       }
       if (b.x <= C.PLAT_X0 + b.r) b.state = 'return';
@@ -2705,8 +2723,8 @@ function updateBoss(dt) {
       break;
   }
 
-  // hero interaction (skipped while ghostly, dodging, or during boss hit-stun)
-  if (h.ghost <= 0 && h.dodgeT <= 0 && !h.dead && b.iframe <= 0) {
+  // hero interaction (skipped while ghostly, dodging, during boss hit-stun, or mid-teleport)
+  if (h.ghost <= 0 && h.dodgeT <= 0 && !h.dead && b.iframe <= 0 && !b.tpGone) {
     const bl = b.x - b.r, br = b.x + b.r, btop = b.y - 2 * b.r, bbot = b.y;
     const hl = h.x - h.w / 2, hr = h.x + h.w / 2, htop = h.y - h.h, hbot = h.y;
     const SM = 5;
@@ -2841,7 +2859,7 @@ function update(dt) {
     Game.cam.x = Math.max(0, Math.min(Math.max(0, maze.width - C.W), Math.round(h.x - C.W / 2)));
     Game.cam.y = Math.max(0, Math.min(Math.max(0, maze.height - C.H), Math.round(h.y - C.H * 0.55)));
     if (!h.dead && h.y >= maze.deathY) heroDie();
-    else if (!h.dead && Math.abs(h.x - maze.exit.x) < 10 && h.y > maze.exit.y - 24 && h.y <= maze.exit.y + 4) onMazeExit();
+    else if (!h.dead && Math.abs(h.x - maze.exit.x) < 10 && h.y > maze.exit.y - 24 && h.y <= maze.exit.y + 4) { onMazeExit(); return; }   // → shadow arena; bail this frame
     if (!h.dead) updateMazeInteract(maze, h);
   } else {
     // boss VOID (L2): dropping into the marked pit past the sky-climb → the boss, not death
@@ -3149,10 +3167,13 @@ function drawMazeKey(k) {
   }
   ctx.restore();
 }
+// True on Level 6 in either phase (maze traverse or the shadow boss arena) → B&W rendering.
+function shadowLevel() { return Game.level === MAZE_LEVEL; }
+const SHADOW_DECO = { body: '#b9bdc6', edge: '#ffffff', hi: '#ffffff', brick: '#5a5e66' };   // light B&W stone
 function drawTerrain() {
   const ter = Game.terrain; if (!ter) return;
   if (ter.maze) { drawMaze(ter); return; }
-  const world = Game.theme.world, d = (WORLDS[world] || WORLDS.classic).deco, fn = SEG_RENDER[world];
+  const world = Game.theme.world, d = shadowLevel() ? SHADOW_DECO : (WORLDS[world] || WORLDS.classic).deco, fn = shadowLevel() ? null : SEG_RENDER[world];
   // Holes (gaps between segments) stay open → sky/hazard shows through.
   const segs = ter.traverse ? ter.ground : ter.segments;
   for (const s of segs) { if (fn) fn(s, d); else segDefault(s, d); }
@@ -3518,7 +3539,7 @@ function drawHero() {
   ctx.globalAlpha = 1;
 }
 
-const ENEMY_COL = { clear: '#dfe6e9', red: '#e0392f', yellow: '#f4d03f', rainbow: '#fff', volcano: '#c1121f', blue: '#2a7fd0', orange: '#ff8a2c' };
+const ENEMY_COL = { clear: '#dfe6e9', red: '#e0392f', yellow: '#f4d03f', rainbow: '#fff', volcano: '#c1121f', blue: '#2a7fd0', orange: '#ff8a2c', shadow: '#20222a' };
 
 function drawDonut(cx, cy, r, type, spikes, gaze, alpha, phase, blood) {
   const col = ENEMY_COL[type] || '#fff';
@@ -3547,8 +3568,9 @@ function drawDonut(cx, cy, r, type, spikes, gaze, alpha, phase, blood) {
 
 function drawEnemies() {
   const phase = Game.t * 6;
-  // L6: enemies render COLOURLESS (still behave as their real type) — a stark B&W lens.
-  const mono = Game.terrain && Game.terrain.maze;
+  // L6: enemies render COLOURLESS (still behave as their real type) — a stark B&W lens,
+  // in both the maze and the shadow arena (reinforcements are greyscale too).
+  const mono = shadowLevel();
   if (mono) { ctx.save(); ctx.filter = 'grayscale(1) contrast(1.1) brightness(1.2)'; }
   for (const e of Game.enemies) {
     // fading motion trail (longer + brighter for a thrown mini-boss)
@@ -3568,8 +3590,47 @@ function drawEnemies() {
   if (mono) ctx.restore();
 }
 
+// The evil-hero doppelgänger: a scaled-up, blacked-out version of the hero with burning eyes.
+function drawShadowBoss(b) {
+  const r = b.r, cx = b.x + (b.state === 'shriek' ? (Math.random() * 2 - 1) * 2.5 : 0);
+  const feetY = b.y, w = r * 1.7, x = cx - w / 2, bh = r * 2, topY = feetY - bh;
+  const phase2 = b.enraged || b.hits >= Math.ceil(b.maxHits * 2 / 3);
+  // aura cues (telegraph / teleport wind-up, shriek, scream) — same language as the other bosses
+  if (b.state === 'telegraph' || b.state === 'feint' || b.state === 'teleport') {
+    const p = 0.5 + 0.5 * Math.sin(Game.t * 24);
+    ctx.fillStyle = `rgba(224,57,47,${0.14 + 0.2 * p})`; ctx.beginPath(); ctx.arc(cx, feetY - r, r + 7 + p * 3, 0, Math.PI * 2); ctx.fill();
+  }
+  if (b.state === 'shriek') { const p = 0.5 + 0.5 * Math.sin(Game.t * 30); ctx.strokeStyle = `rgba(255,60,40,${0.3 + 0.45 * p})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx, feetY - r, r + 4 + p * 4, 0, Math.PI * 2); ctx.stroke(); }
+  if (b.state === 'scream') { const prog = 1 - b.stateT / BOSS.screamDur, R = BOSS.screamRadius; for (let i = 0; i < 3; i++) { const rr = ((prog + i / 3) % 1) * R; ctx.strokeStyle = `rgba(255,90,50,${0.5 * (1 - rr / R)})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx, feetY - r, r + rr, 0, Math.PI * 2); ctx.stroke(); } }
+
+  let alpha = 1;
+  if (b.tpGone) alpha = 0.1 + 0.08 * (0.5 + 0.5 * Math.sin(Game.t * 40));       // vanished mid-teleport
+  else if (b.state === 'teleport') alpha = 0.45 + 0.45 * Math.sin(Game.t * 30); // flickering wind-up
+  else if (b.iframe > 0 && ((Game.t * 24) | 0) & 1) alpha = 0.5;                 // hit flash
+
+  ctx.save(); ctx.globalAlpha = alpha;
+  ctx.fillStyle = '#050505';                                                     // legs
+  const stepping = b.onGround && Math.abs(b.vx) > 6, sw = stepping && Math.sin(Game.t * 18) > 0 ? 2 : 0;
+  ctx.fillRect(x + 3, feetY - 4, 5, 4 + sw); ctx.fillRect(x + w - 8, feetY - 4, 5, 4 - sw);
+  ctx.fillStyle = phase2 ? '#26121a' : '#0e1014'; ctx.fillRect(x, topY, w, bh - 3);   // dark body
+  ctx.fillStyle = phase2 ? '#e0392f' : '#7a1520';                                // evil inverted-T (the hero's is blue)
+  ctx.fillRect(x + 3, topY + 3, w - 6, 4); ctx.fillRect(cx - 2, topY + 3, 4, bh - 12);
+  ctx.fillStyle = phase2 ? '#ff5a45' : '#e0392f';                                // burning eyes
+  ctx.fillRect(cx - r * 0.5, topY + r * 0.5, 4, 3); ctx.fillRect(cx + r * 0.18, topY + r * 0.5, 4, 3);
+  ctx.fillStyle = phase2 ? 'rgba(224,57,47,0.9)' : 'rgba(220,225,235,0.8)';      // outline
+  ctx.fillRect(x - 1, topY - 1, w + 2, 1); ctx.fillRect(x - 1, feetY - 3, w + 2, 1); ctx.fillRect(x - 1, topY - 1, 1, bh); ctx.fillRect(x + w, topY - 1, 1, bh);
+  ctx.fillStyle = '#050505'; const armY = topY + bh * 0.42;                      // menacing arms
+  ctx.fillRect(x + w, armY, 6, 3); ctx.fillRect(x - 6, armY + 3, 6, 3);
+  ctx.restore();
+
+  // HP bar (big count → a bar)
+  const remain = b.maxHits - b.hits, bw = 34, bx = cx - bw / 2, by = topY - 8;
+  ctx.fillStyle = 'rgba(255,255,255,0.2)'; ctx.fillRect(bx, by, bw, 4);
+  ctx.fillStyle = phase2 ? '#e0392f' : '#c6cad2'; ctx.fillRect(bx, by, bw * Math.max(0, remain / b.maxHits), 4);
+}
 function drawBoss() {
   const b = Game.boss; if (!b) return;
+  if (b.type === 'shadow') { drawShadowBoss(b); return; }
   const trembleX = b.state === 'shriek' ? (Math.random() * 2 - 1) * 2.5 : 0;   // shake as a scream warning
   const cx = b.x + trembleX, cy = b.y - b.r, r = b.r;
   const phase2 = b.enraged || b.hits >= Math.ceil(b.maxHits * 2 / 3);   // enraged in the last third (or revived)
@@ -3797,8 +3858,9 @@ function render() {
   }
 
   // Background stays screen-fixed (parallax 0): themed sky → backdrop → hazard band.
-  // The maze is a stark black-and-white interior: pure-black void behind light stone walls.
-  if (Game.terrain && Game.terrain.maze) {
+  // L6 (maze traverse AND the shadow boss arena) is a stark black-and-white interior:
+  // a pure-black void behind light stone. Everything else keeps its themed sky + backdrop.
+  if (shadowLevel()) {
     ctx.fillStyle = '#060608'; ctx.fillRect(0, 0, C.W, C.H);
   } else {
     drawSky(Game.theme.sky);
@@ -3832,7 +3894,7 @@ function render() {
   else if (Game.scene === 'INTRO') centerText([{ t: 'LEVEL ' + Game.level, big: true, color: '#f4d03f' }, { t: (WORLDS[Game.theme.world] || {}).name + ' · ' + (SKY_NAMES[Game.theme.sky] || ''), color: '#eee8d5' }, { t: 'run to the end, then fight the boss', color: '#93a1a1' }]);
   else if (Game.scene === 'CLEAR') centerText([{ t: 'LEVEL CLEAR', big: true, color: '#7cb342' }].concat(Game.gainedLife ? [{ t: '★ no-hit bonus: +1 heart! ★', color: '#f4d03f' }] : [{ t: 'points ' + Game.points, color: '#93a1a1' }]));
   else if (Game.scene === 'GAMEOVER') centerText([{ t: 'GAME OVER', big: true, color: '#e0392f' }, { t: 'reached level ' + Game.level, color: '#eee8d5' }, { t: 'tap to return to title', color: '#93a1a1' }]);
-  else if (Game.scene === 'VICTORY') centerText([{ t: 'VICTORY!', big: true, color: '#f4d03f' }, { t: 'you conquered the tower', color: '#eee8d5' }, { t: MODES[Game.mode].name, color: '#93a1a1' }, { t: 'tap to return to title', color: '#93a1a1' }]);
+  else if (Game.scene === 'VICTORY') centerText([{ t: 'VICTORY!', big: true, color: '#f4d03f' }, { t: 'you escaped the labyrinth and beat your shadow', color: '#eee8d5' }, { t: MODES[Game.mode].name, color: '#93a1a1' }, { t: 'tap to return to title', color: '#93a1a1' }]);
 
   ctx.restore();
   if (Game.scene === 'PLAY' && Game.hp > 0 && Game.hp <= 1) drawLowHpVignette();   // ≤1 heart: danger
