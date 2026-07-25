@@ -3109,9 +3109,10 @@ function drawMaze(mz) {
   for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) {
     if (mz.grid[ty * mz.cols + tx] !== MZ.WALL) continue;
     const x = tx * T, y = ty * T;
-    ctx.fillStyle = '#2a2f3a'; ctx.fillRect(x, y, T, T);
-    ctx.fillStyle = '#3c4454'; ctx.fillRect(x, y, T, 2);
-    ctx.fillStyle = '#171b22'; ctx.fillRect(x, y + T - 2, T, 2);
+    ctx.fillStyle = '#b9bdc6'; ctx.fillRect(x, y, T, T);          // light stone (high contrast on black)
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(x, y, T, 2);          // bright top edge
+    ctx.fillStyle = '#5a5e66'; ctx.fillRect(x, y + T - 2, T, 2);  // shaded bottom
+    ctx.fillStyle = '#8b8f98'; ctx.fillRect(x, y, 1, T);          // subtle mortar seam
   }
   for (const c of mz.climbables) drawClimbable(c);      // rope/ladder climb-shafts
   for (const d of (mz.doors || [])) if (!d.open) drawMazeDoor(d);
@@ -3121,13 +3122,13 @@ function drawMaze(mz) {
   ctx.fillStyle = '#8fd0ff'; ctx.fillRect(e.x - 6, e.y - 22, 12, 22);
   ctx.fillStyle = `rgba(214,240,255,${0.5 + 0.5 * gl})`; ctx.fillRect(e.x - 6, e.y - 22, 12, 3);
 }
-// A locked door: a barred gate filling the doorway, with a glowing diamond keyhole.
+// A locked door: a dark barred gate in the light wall, with a bright diamond keyhole.
 function drawMazeDoor(d) {
-  ctx.fillStyle = '#6b4f8a'; ctx.fillRect(d.x, d.y, d.w, d.h);
-  ctx.fillStyle = '#8a6bb0'; for (let yy = d.y + 2; yy < d.y + d.h; yy += 5) ctx.fillRect(d.x + 1, yy, d.w - 2, 2);   // bars
-  ctx.fillStyle = '#4a3568'; ctx.fillRect(d.x, d.y, 2, d.h); ctx.fillRect(d.x + d.w - 2, d.y, 2, d.h);
+  ctx.fillStyle = '#141518'; ctx.fillRect(d.x, d.y, d.w, d.h);
+  ctx.fillStyle = '#c6cad2'; for (let yy = d.y + 2; yy < d.y + d.h; yy += 5) ctx.fillRect(d.x + 1, yy, d.w - 2, 2);   // pale bars
+  ctx.fillStyle = '#3a3d44'; ctx.fillRect(d.x, d.y, 2, d.h); ctx.fillRect(d.x + d.w - 2, d.y, 2, d.h);
   const cx = d.x + d.w / 2, cy = d.y + d.h / 2, s = 4;   // diamond keyhole
-  ctx.fillStyle = '#d6c0ff'; ctx.beginPath(); ctx.moveTo(cx, cy - s); ctx.lineTo(cx + s, cy); ctx.lineTo(cx, cy + s); ctx.lineTo(cx - s, cy); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.moveTo(cx, cy - s); ctx.lineTo(cx + s, cy); ctx.lineTo(cx, cy + s); ctx.lineTo(cx - s, cy); ctx.closePath(); ctx.fill();
 }
 // A diamond key. Locked = dim + caged (defeat the guarding pair to free it); free = glowing.
 function drawMazeKey(k) {
@@ -3140,10 +3141,11 @@ function drawMazeKey(k) {
     ctx.strokeStyle = 'rgba(160,170,185,0.75)'; ctx.lineWidth = 1;   // cage bars
     ctx.beginPath(); ctx.moveTo(cx - 6, cy - 7); ctx.lineTo(cx - 6, cy + 7); ctx.moveTo(cx, cy - 8); ctx.lineTo(cx, cy + 8); ctx.moveTo(cx + 6, cy - 7); ctx.lineTo(cx + 6, cy + 7); ctx.stroke();
   } else {
-    ctx.fillStyle = `rgba(143,208,255,${0.25 + 0.15 * (0.5 + 0.5 * Math.sin(Game.t * 5))})`;
-    ctx.beginPath(); ctx.arc(cx, cy, 9, 0, 7); ctx.fill();   // glow
-    ctx.fillStyle = '#8fd0ff'; ctx.beginPath(); ctx.moveTo(cx, cy - s); ctx.lineTo(cx + s, cy); ctx.lineTo(cx, cy + s); ctx.lineTo(cx - s, cy); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = '#eaf6ff'; ctx.beginPath(); ctx.moveTo(cx - 1.5, cy - s + 1.5); ctx.lineTo(cx + 1, cy - 1); ctx.lineTo(cx - 1.5, cy + 1); ctx.closePath(); ctx.fill();   // facet highlight
+    const g = 0.5 + 0.5 * Math.sin(Game.t * 5);
+    ctx.fillStyle = `rgba(255,255,255,${0.18 + 0.16 * g})`;
+    ctx.beginPath(); ctx.arc(cx, cy, 9, 0, 7); ctx.fill();   // white glow (B&W)
+    ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.moveTo(cx, cy - s); ctx.lineTo(cx + s, cy); ctx.lineTo(cx, cy + s); ctx.lineTo(cx - s, cy); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#9aa0aa'; ctx.beginPath(); ctx.moveTo(cx + 1, cy + 1); ctx.lineTo(cx + s, cy); ctx.lineTo(cx, cy + s); ctx.closePath(); ctx.fill();   // facet shade
   }
   ctx.restore();
 }
@@ -3262,6 +3264,7 @@ function drawHazardObj(hz) {
 function drawClimbable(c) {
   const x = c.x, y0 = c.top, y1 = c.bot;
   ctx.save();
+  if (Game.terrain && Game.terrain.maze) ctx.filter = 'grayscale(1) brightness(1.15)';   // B&W maze: colourless ropes
   if (c.kind === 'ladder') {
     ctx.fillStyle = '#8a5a30'; ctx.fillRect(x - 5, y0, 2, y1 - y0); ctx.fillRect(x + 3, y0, 2, y1 - y0);   // rails
     ctx.fillStyle = '#a87a44'; for (let y = y0 + 3; y < y1; y += 7) ctx.fillRect(x - 5, y, 10, 2);          // rungs
@@ -3544,6 +3547,9 @@ function drawDonut(cx, cy, r, type, spikes, gaze, alpha, phase, blood) {
 
 function drawEnemies() {
   const phase = Game.t * 6;
+  // L6: enemies render COLOURLESS (still behave as their real type) — a stark B&W lens.
+  const mono = Game.terrain && Game.terrain.maze;
+  if (mono) { ctx.save(); ctx.filter = 'grayscale(1) contrast(1.1) brightness(1.2)'; }
   for (const e of Game.enemies) {
     // fading motion trail (longer + brighter for a thrown mini-boss)
     const trailA = e.thrown ? 0.22 : 1;
@@ -3559,6 +3565,7 @@ function drawEnemies() {
     }
     drawDonut(e.x, e.y - e.r, e.r, e.type, e.spikes, e.gaze, 1, phase + (e.thrown ? Game.t * 40 : 0), e.bloodshot);
   }
+  if (mono) ctx.restore();
 }
 
 function drawBoss() {
@@ -3790,9 +3797,9 @@ function render() {
   }
 
   // Background stays screen-fixed (parallax 0): themed sky → backdrop → hazard band.
-  // The maze is an interior — a flat dark fill instead (PR-E gives it a B&W high-contrast look).
+  // The maze is a stark black-and-white interior: pure-black void behind light stone walls.
   if (Game.terrain && Game.terrain.maze) {
-    ctx.fillStyle = '#0b0d14'; ctx.fillRect(0, 0, C.W, C.H);
+    ctx.fillStyle = '#060608'; ctx.fillRect(0, 0, C.W, C.H);
   } else {
     drawSky(Game.theme.sky);
     drawWorldBackdrop(Game.theme.world);
