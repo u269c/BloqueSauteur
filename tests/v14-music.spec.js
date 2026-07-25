@@ -4,7 +4,7 @@
 const { test, expect } = require('@playwright/test');
 const { openGame } = require('./helpers');
 
-const SONGS = ['title', 1, 2, 3, 4, 5, 'boss', 'merchant'];
+const SONGS = ['title', 1, 2, 3, 4, 5, 6, 'boss', 'merchant'];   // 6 = the L6 "Tank!" jazz-fusion track
 
 test('every genre song schedules many parallel voices; no page errors', async ({ page }) => {
   const errors = [];

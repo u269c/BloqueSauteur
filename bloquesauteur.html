@@ -572,6 +572,23 @@ const MUSIC = {
       ['A4',.5],['R',.5],['A4',.5],['R',.5],['E5',.5],['R',.5],['D5',.5],['R',.5] ], 8) },
     drums(DRUM.techno, 16) ] },
 
+  // L6 — "Tank!"-style bebop big-band jazz-fusion at EDM speed (Fm): a frantic walking
+  // bass, syncopated brass stabs and a driving swing. The black-and-white labyrinth chase.
+  6: { bpm: 168, loop: true, layers: [
+    // walking bass (bebop quarter notes) through Fm–B♭m7–C7–Fm turnaround
+    { wave: 'triangle', gain: 0.19, notes: rep([
+      ['F2',1],['G#2',1],['C3',1],['D#3',1],
+      ['A#2',1],['C#3',1],['F3',1],['G#2',1],
+      ['C3',1],['E3',1],['G3',1],['A#2',1],
+      ['F2',1],['C3',1],['C#3',1],['C3',1] ], 4) },
+    // brass stabs — syncopated bebop hits, up high
+    { wave: 'square', gain: 0.12, sus: 0.22, notes: rep([
+      ['F5',.5],['R',.5],['G#5',.5],['C6',.5],['R',.5],['C6',.5],['A#5',.5],['G#5',.5],
+      ['A#5',.5],['R',.5],['C#6',.5],['C6',.5],['R',.5],['A#5',.5],['G#5',.5],['F5',.5],
+      ['C6',.5],['G5',.5],['E5',.5],['G5',.5],['C6',.5],['R',.5],['A#5',.5],['R',.5],
+      ['F5',.25],['G5',.25],['G#5',.25],['A#5',.25],['C6',.5],['R',.5],['C6',1],['R',1] ], 4) },
+    drums(DRUM.jazz, 16) ] },
+
   // BOSS — Charlotte de Witte hard techno (Dm), rolling 16th acid bass + aggressive stabs.
   boss: { bpm: 140, loop: true, layers: [
     { wave: 'sawtooth', gain: 0.17, notes: rep(roll('D2',16).concat(roll('D2',16), roll('A#1',16), roll('C2',16)), 4) },
@@ -2613,7 +2630,7 @@ function activateBoss() {
     lives: type === 'volcano' ? 2 : 1, enraged: false, canScream: type === 'volcano' || type === 'shadow', screamT: 2.5,
     tpGone: false,   // shadow boss: invisible mid-teleport
   };
-  Audio.sfx('bossSpawn'); Audio.playMusic('boss'); shake(6);
+  Audio.sfx('bossSpawn'); Audio.playMusic(Game.level === MAZE_LEVEL ? MAZE_LEVEL : 'boss'); shake(6);   // the shadow duel keeps the L6 "Tank!" theme
 }
 
 function bossHit(b, n) {
