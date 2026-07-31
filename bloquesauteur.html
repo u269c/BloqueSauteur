@@ -325,12 +325,12 @@ const PALETTE = [
 // Per-level difficulty (spawn cadence, enemy roster, pace, boss variant).
 // Numbers are feel-tuning knobs (revisited in P7).
 const LEVELS = {
-  1: { types: ['clear'],                  spawnEvery: 2.2, speed: 26, maxAlive: 4, boss: 'clear'   },
-  2: { types: ['clear', 'red'],           spawnEvery: 2.0, speed: 26, maxAlive: 5, boss: 'red'     },
-  3: { types: ['clear', 'red', 'yellow'], spawnEvery: 2.0, speed: 26, maxAlive: 6, boss: 'yellow'  },
-  4: { types: ['clear', 'red', 'yellow'], spawnEvery: 1.4, speed: 32, maxAlive: 7, boss: 'rainbow' },
-  5: { types: ['clear', 'red', 'yellow'], spawnEvery: 1.3, speed: 34, maxAlive: 8, boss: 'volcano' },
-  6: { types: ['clear', 'red', 'yellow'], spawnEvery: 1.2, speed: 36, maxAlive: 9, boss: 'shadow'  },   // the evil-hero finale
+  1: { types: ['clear'],                  spawnEvery: 2.2, speed: 26, maxAlive: 3, boss: 'clear'   },   // maxAlive cut ~20% (was 4/5/6/7/8/9)
+  2: { types: ['clear', 'red'],           spawnEvery: 2.0, speed: 26, maxAlive: 4, boss: 'red'     },
+  3: { types: ['clear', 'red', 'yellow'], spawnEvery: 2.0, speed: 26, maxAlive: 5, boss: 'yellow'  },
+  4: { types: ['clear', 'red', 'yellow'], spawnEvery: 1.4, speed: 32, maxAlive: 6, boss: 'rainbow' },
+  5: { types: ['clear', 'red', 'yellow'], spawnEvery: 1.3, speed: 34, maxAlive: 6, boss: 'volcano' },
+  6: { types: ['clear', 'red', 'yellow'], spawnEvery: 1.2, speed: 36, maxAlive: 7, boss: 'shadow'  },   // the evil-hero finale
 };
 const LAST_LEVEL = 6;
 // Level 6 — "THE LABYRINTH" — is the finale: a full 2D grid maze on a second, tile-grid
@@ -346,11 +346,11 @@ function maxPlayableLevel() { return Math.max(LAST_LEVEL, MAZE_LEVEL); }
 // chunks = number of hole+ground segments (levels are ~half their old length).
 // enemies = ~1.3x the old counts (denser — lots on screen at once).
 const TRAVERSE = {
-  1: { chunks: 14, enemies: 19,  chests: 2 },   // enemy counts cut ~30% across the board
-  2: { chunks: 11, enemies: 32,  chests: 2 },   // L2 = sky-climb finale into a boss void
-  3: { chunks: 15, enemies: 45,  chests: 3 },
-  4: { chunks: 20, enemies: 43,  chests: 3 },
-  5: { chunks: 23, enemies: 57,  chests: 4 },
+  1: { chunks: 14, enemies: 15,  chests: 2 },   // enemy counts cut a further 20% (was 19/32/45/43/57)
+  2: { chunks: 11, enemies: 26,  chests: 2 },   // L2 = sky-climb finale into a boss void
+  3: { chunks: 15, enemies: 36,  chests: 3 },
+  4: { chunks: 20, enemies: 34,  chests: 3 },
+  5: { chunks: 23, enemies: 46,  chests: 4 },
 };
 // Treasure-chest loot: stomp a chest to pop a mushroom. ~25% of chests are "bad".
 const GOOD_SHROOMS = ['highjump', 'teleport', 'heal', 'heal', 'money'];   // heal weighted a bit higher
@@ -365,10 +365,10 @@ const ARENA = {
   6: { holes: 3, boxes: 2, boxSpeed: 1.4 },   // evil-hero arena: reinforcements pour in
 };
 const ENEMY = { r: 7, speedMul: { clear: 1, red: 1.7, yellow: 1, blue: 2.4, orange: 1 }, bounce: 300, jumpImpulse: 205, gravity: 900, leapV: 250, leapVX: 118 };
-// How many stomps each type takes to kill. After the FIRST hit, red/yellow/blue turn
-// bloodshot: +20% speed and they hunt the hero (like blue donuts). clear dies in one.
-// orange = the L6 maze mini-boss: blue-style homing, but 6 hits and it comes in a pair.
-const ENEMY_HITS = { clear: 1, red: 2, yellow: 2, blue: 3, orange: 6 };
+// How many stomps each type takes to kill. After the FIRST hit, yellow/blue turn bloodshot:
+// +20% speed and they hunt the hero (like blue donuts). clear & red die in one (red is the
+// fast rusher — one hit, but quick). orange = the L6 maze mini-boss: 6 hits, comes in a pair.
+const ENEMY_HITS = { clear: 1, red: 1, yellow: 2, blue: 3, orange: 6 };
 const ENRAGE_SPEEDUP = 1.2, ENEMY_HIT_IFRAME = 0.5;
 const BOSS = {
   r: 17, hits: 3, iframe: 0.9, returnSpeed: 95, jumpImpulse: 250,
