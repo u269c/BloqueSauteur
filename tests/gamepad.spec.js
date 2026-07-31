@@ -95,3 +95,75 @@ test.describe('gamepad (PS5 / standard mapping)', () => {
     expect(await page.evaluate(() => window.BS.Input.left)).toBe(false);
   });
 });
+
+// A pad whose vibration actuator records every playEffect call.
+async function installHapticPad(page) {
+  await page.evaluate(() => {
+    window.__rumbles = [];
+    window.__pad = {
+      connected: true, mapping: 'standard', id: 'DualSense',
+      buttons: Array.from({ length: 17 }, () => ({ pressed: false, value: 0 })), axes: [0, 0, 0, 0],
+      vibrationActuator: { playEffect: (type, opts) => { window.__rumbles.push({ type, opts }); return Promise.resolve('complete'); } },
+    };
+    navigator.getGamepads = () => [window.__pad];
+    window.BS.freeze(true);
+  });
+}
+const rumbleCount = (page) => page.evaluate(() => window.__rumbles.length);
+
+test.describe('haptic rumble', () => {
+  test('rumble() plays a dual-rumble effect with the given magnitudes (neg. control: no actuator)', async ({ page }) => {
+    await openGame(page); await enterPlayPanel(page, 0);
+    await installHapticPad(page);
+    await page.evaluate(() => window.BS.rumble(0.5, 0.3, 120));
+    const r = await page.evaluate(() => window.__rumbles);
+    expect(r.length).toBe(1);
+    expect(r[0].type).toBe('dual-rumble');
+    expect(r[0].opts.strongMagnitude).toBe(0.5);
+    expect(r[0].opts.weakMagnitude).toBe(0.3);
+    // NEGATIVE CONTROL: a pad without a vibration actuator → no-op
+    await page.evaluate(() => { window.__pad.vibrationActuator = null; window.__rumbles = []; window.BS.rumble(1, 1, 100); });
+    expect(await rumbleCount(page)).toBe(0);
+  });
+
+  test('getting HIT rumbles the pad (neg. control: harmless Easy-mode contact does not)', async ({ page }) => {
+    await openGame(page); await enterPlayPanel(page, 0);
+    await installHapticPad(page);
+    await page.evaluate(() => {
+      window.BS.startGame(1); window.BS.gotoPlay(); window.BS.setMode('normal');
+      Object.assign(window.BS.hero(), { ghost: 0, hurt: 0, dead: false }); window.__rumbles = [];
+      window.BS.heroHurt(true);
+    });
+    expect(await rumbleCount(page)).toBeGreaterThan(0);
+    // NEGATIVE CONTROL: in Easy, contact is harmless → no hit, no rumble
+    await page.evaluate(() => {
+      window.BS.setMode('easy'); Object.assign(window.BS.hero(), { ghost: 0, hurt: 0, dead: false }); window.__rumbles = [];
+      window.BS.heroHurt(true);
+    });
+    expect(await rumbleCount(page)).toBe(0);
+  });
+
+  test('FALLING (a death/respawn) rumbles the pad', async ({ page }) => {
+    await openGame(page); await enterPlayPanel(page, 0);
+    await installHapticPad(page);
+    await page.evaluate(() => {
+      window.BS.startGame(1); window.BS.gotoPlay(); const st = window.BS.state(); st.hp = 5;
+      Object.assign(window.BS.hero(), { dead: false }); window.__rumbles = [];
+      window.BS.heroDie();
+    });
+    expect(await rumbleCount(page)).toBeGreaterThan(0);
+  });
+
+  test('the boss SCREAM rumbles the pad', async ({ page }) => {
+    await openGame(page); await enterPlayPanel(page, 0);
+    await installHapticPad(page);
+    await page.evaluate(() => {
+      const st = window.BS.state(); st.level = 6; window.BS.setMode('normal'); window.BS.enterArena();
+      st.scene = 'PLAY'; st.paused = false; window.BS.Input.reset();
+      const b = window.BS.boss(); b.state = 'shriek'; b.stateT = 0.02;   // about to unleash the scream
+      window.__rumbles = [];
+      for (let i = 0; i < 12; i++) window.BS.step(1 / 120);
+    });
+    expect(await rumbleCount(page)).toBeGreaterThan(0);
+  });
+});

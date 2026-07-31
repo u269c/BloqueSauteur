@@ -2298,7 +2298,7 @@ function heroDie() {
   Game.hitThisLevel = true;
   const dmg = Game.mode === 'easy' ? 0.5 : 1;     // Easy is forgiving on falls
   Game.hp = Math.max(0, Game.hp - dmg);
-  Audio.sfx('die'); spawnBurst(h.x, CONFIG.LAVA_Y, '#f4a300', 24); shake(8);
+  Audio.sfx('die'); spawnBurst(h.x, CONFIG.LAVA_Y, '#f4a300', 24); shake(8); rumble(0.9, 0.7, 320);   // a big jolt on a fall
   if (Game.hp <= 0) { Game.hp = 0; onGameOver(); return; }
   respawnHero();
 }
@@ -2313,7 +2313,7 @@ function heroHurt(fromRight) {
   Game.hitThisLevel = true;
   Game.hp = Math.max(0, Game.hp - m.hitDamage);                    // lose a fraction of a heart
   if (m.pointPenalty) Game.points = Math.max(0, Game.points - m.pointPenalty);   // RAGE: −1 point per hit
-  Audio.sfx('hurt'); shake(3);
+  Audio.sfx('hurt'); shake(3); rumble(0.55, 0.35, 160);           // a sharp buzz when hit
   if (Game.hp <= 0) { Game.hp = 0; h.dead = true; onGameOver(); } // out of health → game over
   return true;
 }
@@ -2640,7 +2640,7 @@ function bossHit(b, n) {
   if (b.hits >= b.maxHits) {
     if (b.lives > 1) {                       // revive: full 12 bars, faster, bloodshot
       b.lives -= 1; b.hits = 0; b.maxHits = 12; b.enraged = true; b.iframe = 1.2; b.state = 'enter'; b.y = CONFIG.SPAWN_Y + 16;
-      spawnBurst(b.x, b.y, '#e0392f', 40); shake(12); Audio.sfx('scream');
+      spawnBurst(b.x, b.y, '#e0392f', 40); shake(12); Audio.sfx('scream'); rumble(1.0, 0.9, 500);   // revival roar
       return;
     }
     b.alive = false; Game.boss = null; spawnBurst(b.x, b.y - b.r, '#fff', 30); shake(9); onBossDefeated();
@@ -2698,10 +2698,11 @@ function updateBoss(dt) {
       }
       break;
     case 'shriek':                            // 1.5s tremble warning — run past ½ screen to be safe
+      if (b.stateT === BOSS.screamWarn) rumble(0.3, 0.5, 400);   // low warning buzz as it winds up (flee!)
       b.stateT -= dt;
       if (b.stateT <= 0) {
         b.state = 'scream'; b.stateT = BOSS.screamDur;
-        Audio.sfx('scream');
+        Audio.sfx('scream'); rumble(0.95, 0.9, 450);             // the scream itself — a heavy sustained rumble
         if (Math.abs(h.x - b.x) <= BOSS.screamRadius && h.ghost <= 0 && h.dodgeT <= 0 && !h.dead) h.frozen = BOSS.freeze;   // only if close enough
       }
       break;
@@ -4084,6 +4085,17 @@ function pollGamepad() {
   GP._prev = cur;
 }
 
+// Haptic rumble (DualSense / Xbox) — the tactile twin of the screen shake. magnitudes 0..1.
+// No-op when there's no pad or the browser lacks the vibration actuator.
+function rumble(strong, weak, ms) {
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  let gp = null;
+  for (const p of pads) if (p && p.connected) { gp = p; break; }
+  const act = gp && (gp.vibrationActuator || (gp.hapticActuators && gp.hapticActuators[0]));
+  if (!act || !act.playEffect) return;
+  try { act.playEffect('dual-rumble', { startDelay: 0, duration: ms, strongMagnitude: strong, weakMagnitude: weak }); } catch (e) { /* unsupported effect */ }
+}
+
 // ══════════════════════════════════════════════════════════════════
 //  LOOP — fixed timestep with accumulator; render every frame
 // ══════════════════════════════════════════════════════════════════
@@ -4184,7 +4196,7 @@ window.BS = {
   activateBoss,
   bossHit: () => Game.boss && bossHit(Game.boss),
   addKill,
-  Input, pollGamepad,
+  Input, pollGamepad, rumble, heroDie,
   audioState: () => (Audio.ctx ? Audio.ctx.state : 'none'),
   musicKey: () => Audio.music.key,
   musicRate: () => Audio.music.rate,
