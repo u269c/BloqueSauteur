@@ -893,7 +893,7 @@ function mazeSurfaceAt(mz, x, fromY) {
 // walkable) or a vertical CLIMB-SHAFT (a rope/ladder between the two floors). Because every
 // link is walk- or climb-traversable and cells all sit on a floor, the maze is solvable BY
 // CONSTRUCTION — mazeSolvable() is the net that proves it (tested across seeds).
-const MAZE_CELLS = { CW: 6, CH: 4, cw: 8, ch: 7 };   // cells across/down · tiles per cell (48 × 28 world)
+const MAZE_CELLS = { CW: 10, CH: 7, cw: 8, ch: 7 };   // cells across/down · tiles per cell (80 × 49 world ≈ 1280 × 784 px, ~3× the rooms)
 function genMaze(level, seed) {
   const T = CONFIG.TILE, { CW, CH, cw, ch } = MAZE_CELLS;
   const cols = CW * cw, rows = CH * ch;
