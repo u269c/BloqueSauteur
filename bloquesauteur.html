@@ -996,8 +996,9 @@ function placeMazeGates(P) {
     const cell = pool.length ? pool[Math.floor(rand() * pool.length)] : path[gates[k]];
     used.add(cell);
     const { cx, cy } = cellOf(cell), fr = floorRowOf(cy), ktx = cx * cw + 2, mid = cx * cw + Math.floor(cw / 2);
+    const room = { x0: cx * cw * T, x1: (cx + 1) * cw * T, y0: cy * ch * T, y1: (cy + 1) * ch * T };   // the guards stay dormant until you're inside it
     keys.push({ id: k, tx: ktx, ty: fr - 1, x: ktx * T + T / 2, y: fr * T, taken: false, locked: true });
-    minibosses.push({ pairId: k, keyId: k, freed: false, a: { x: (mid - 1) * T, y: fr * T }, b: { x: (mid + 2) * T, y: fr * T } });
+    minibosses.push({ pairId: k, keyId: k, freed: false, room, a: { x: (mid - 1) * T, y: fr * T }, b: { x: (mid + 2) * T, y: fr * T } });
   }
   return { doors, keys, minibosses };
 }
@@ -1207,8 +1208,8 @@ function buildMazeLevel() {
   Game.spawnT = 1e9;                                   // no ambient spawns in the maze — its foes are the placed mini-boss pairs
   for (const mb of Game.levelData.minibosses) {        // spawn each guarding pair of orange homers
     mb.freed = false;
-    Game.enemies.push(makeOrange(mb.a.x, mb.a.y, mb.pairId, mb.keyId));
-    Game.enemies.push(makeOrange(mb.b.x, mb.b.y, mb.pairId, mb.keyId));
+    Game.enemies.push(makeOrange(mb.a.x, mb.a.y, mb.pairId, mb.keyId, mb.room));
+    Game.enemies.push(makeOrange(mb.b.x, mb.b.y, mb.pairId, mb.keyId, mb.room));
   }
   const sp = Game.levelData.spawn;
   Object.assign(Game.hero, {
@@ -1239,14 +1240,16 @@ function updateMazeInteract(mz, h) {
   }
 }
 // An orange maze mini-boss: a beefy (r 9) blue-style homer, 6 hits, part of a pair.
-function makeOrange(x, y, pairId, keyId) {
+function makeOrange(x, y, pairId, keyId, room) {
   return {
     x, y, vx: 0, vy: 0, r: 9, type: 'orange', side: 'maze', dir: 1, baseSpeed: 44,
     onGround: false, leaping: false, alive: true, trail: [], trailT: 0, patrol: false, homing: true,
     jumpT: 0, spikes: 7, gaze: -1, hits: ENEMY_HITS.orange, maxHits: ENEMY_HITS.orange, bloodshot: false, hitT: 0,
-    pairId, keyId, role: 'idle', tele: 0, thrown: false, throwT: 0, throwVx: 0, throwVy: 0, throwCd: 3 + Game.rand() * 2,
+    pairId, keyId, room, awake: false, role: 'idle', tele: 0, thrown: false, throwT: 0, throwVx: 0, throwVy: 0, throwCd: 3 + Game.rand() * 2,
   };
 }
+// A guard only wakes (homes + attacks) once the hero steps into its room.
+function heroInRoom(room, h) { return room && h.x >= room.x0 && h.x <= room.x1 && h.y > room.y0 && h.y <= room.y1 + 4; }
 // Fire a mini-boss as a projectile toward the hero's current position.
 function launchMazeThrow(e, h) {
   const spd = 250, dx = h.x - e.x, dy = (h.y - h.h / 2) - e.y, d = Math.hypot(dx, dy) || 1;
@@ -1274,13 +1277,16 @@ function updateMazeEnemies(dt) {
       continue;
     }
 
+    if (!e.awake && heroInRoom(e.room, h)) e.awake = true;   // wake only when the hero enters the room
     e.vy += G * dt;
     if (e.tele > 0) {                               // ── winding up a throw (frozen) ──
       e.tele -= dt; e.vx = 0;
       if (e.tele <= 0) { if (e.role === 'proj') { launchMazeThrow(e, h); continue; } e.role = 'idle'; }
-    } else {
+    } else if (e.awake) {                           // active: home toward the hero + count down the throw
       if (e.onGround) { e.dir = h.x < e.x ? -1 : 1; e.vx = e.dir * (e.baseSpeed * (e.bloodshot ? ENRAGE_SPEEDUP : 1)); }
       if (e.throwCd > 0) e.throwCd -= dt;
+    } else {                                        // dormant: stand still in the room
+      e.vx = 0;
     }
 
     // horizontal tile collision
@@ -1301,11 +1307,11 @@ function updateMazeEnemies(dt) {
     }
   }
 
-  // co-op throw: a full-strength pair, off cooldown, with the hero in range → wind up + throw
+  // co-op throw: an awake, full-strength pair, off cooldown, with the hero in range → wind up + throw
   for (const id in pairs) {
     const pr = pairs[id]; if (pr.length < 2) continue;
     const a = pr[0], b = pr[1];
-    if (a.throwCd <= 0 && b.throwCd <= 0 && a.tele <= 0 && b.tele <= 0 && !a.thrown && !b.thrown && a.onGround && b.onGround
+    if (a.awake && b.awake && a.throwCd <= 0 && b.throwCd <= 0 && a.tele <= 0 && b.tele <= 0 && !a.thrown && !b.thrown && a.onGround && b.onGround
         && Math.abs(h.x - (a.x + b.x) / 2) < 150 && Math.abs(h.y - a.y) < 72) {
       const thrower = Math.abs(a.x - h.x) <= Math.abs(b.x - h.x) ? a : b, proj = thrower === a ? b : a;
       thrower.role = 'thrower'; proj.role = 'proj';
@@ -1322,6 +1328,8 @@ function updateMazeEnemies(dt) {
       if (key) { key.locked = false; addFloater(key.x, key.y - 26, '◆ KEY FREED', '#8fd0ff'); spawnBurst(key.x, key.y - 8, '#8fd0ff', 18); shake(5); Audio.sfx('lifeUp'); }
     }
   }
+
+  if (Game.enemies.length) Game.enemies = Game.enemies.filter((e) => e.alive);   // clear the dead (mini-bosses vanish when killed)
 }
 function buildLevel() {
   // A level begins in the scrolling TRAVERSE phase (the boss arena comes at the exit).
@@ -3591,6 +3599,7 @@ function drawEnemies() {
   const mono = shadowLevel();
   if (mono) { ctx.save(); ctx.filter = 'grayscale(1) contrast(1.1) brightness(1.2)'; }
   for (const e of Game.enemies) {
+    if (!e.alive) continue;   // never draw a defeated enemy
     // fading motion trail (longer + brighter for a thrown mini-boss)
     const trailA = e.thrown ? 0.22 : 1;
     for (let i = 0; i < e.trail.length; i++) {

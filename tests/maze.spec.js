@@ -273,7 +273,8 @@ function installMinibossMaze() {
   for (let tx = 0; tx < cols; tx++) { S(tx, 0); S(tx, rows - 1); }
   for (let tx = 1; tx < cols - 1; tx++) S(tx, fr);
   const key = { id: 0, tx: 3, ty: fr - 1, x: 3 * T + T / 2, y: fr * T, taken: false, locked: true };
-  const mb = { pairId: 0, keyId: 0, freed: false, a: { x: 10 * T, y: fr * T }, b: { x: 12 * T, y: fr * T } };
+  const room = { x0: 0, x1: cols * T, y0: 0, y1: rows * T };   // whole play area is "the room" here
+  const mb = { pairId: 0, keyId: 0, freed: false, room, a: { x: 10 * T, y: fr * T }, b: { x: 12 * T, y: fr * T } };
   const mz = {
     maze: true, level: 6, seed: 1, cols, rows, tileW: T, width: cols * T, height: rows * T, grid,
     climbables: [], hazards: [], chests: [], floats: [], enemies: [], doors: [], keys: [key], keysNeeded: 0, minibosses: [mb],
@@ -282,8 +283,8 @@ function installMinibossMaze() {
   const st = window.BS.state();
   st.terrain = mz; st.levelData = mz; st.phase = 'traverse'; st.scene = 'PLAY'; st.paused = false; st.keys = 0; st.mode = 'normal';
   st.enemies.length = 0;
-  st.enemies.push(window.BS.makeOrange(mb.a.x, mb.a.y, 0, 0));
-  st.enemies.push(window.BS.makeOrange(mb.b.x, mb.b.y, 0, 0));
+  st.enemies.push(window.BS.makeOrange(mb.a.x, mb.a.y, 0, 0, mb.room));
+  st.enemies.push(window.BS.makeOrange(mb.b.x, mb.b.y, 0, 0, mb.room));
   window.BS.freeze(true); window.BS.Input.reset();
   return { T, fr };
 }
@@ -380,6 +381,40 @@ test.describe('L6 maze — orange mini-boss pairs', () => {
     expect(r.stillLocked).toBe(true);   // negative control
     expect(r.freed).toBe(true);
     expect(r.collected).toBe(true);
+  });
+
+  test('guards stay dormant until the hero enters their room (neg. control: outside = no chase)', async ({ page }) => {
+    await openGame(page); await enterPlayPanel(page, 0);
+    const r = await page.evaluate((src) => {
+      const install = new Function('return (' + src + ')')(); const { T, fr } = install();
+      const es = window.BS.enemies(), h = window.BS.hero();
+      const room = { x0: 8 * T, x1: 14 * T, y0: 0, y1: 10 * T };   // a narrow room, not the whole grid
+      es.forEach((e) => { e.room = room; e.awake = false; e.x = 11 * T; });
+      // NEGATIVE CONTROL: hero OUTSIDE the room → dormant, doesn't budge toward the hero
+      Object.assign(h, { x: 2 * T, y: fr * T, vx: 0, vy: 0, onGround: true });
+      const x0 = es[0].x;
+      for (let i = 0; i < 120; i++) window.BS.updateMazeEnemies(1 / 120);
+      const dormant = !es[0].awake && Math.abs(es[0].x - x0) < 1;
+      // hero ENTERS the room → it wakes
+      Object.assign(h, { x: 11 * T, y: fr * T, vx: 0, vy: 0, onGround: true });
+      for (let i = 0; i < 60; i++) window.BS.updateMazeEnemies(1 / 120);
+      return { dormant, woke: es[0].awake };
+    }, installMinibossMaze.toString());
+    expect(r.dormant).toBe(true);   // negative control: outside the room it never chases
+    expect(r.woke).toBe(true);
+  });
+
+  test('a defeated pair is removed from the enemy list (no lingering sprites)', async ({ page }) => {
+    await openGame(page); await enterPlayPanel(page, 0);
+    const r = await page.evaluate((src) => {
+      const install = new Function('return (' + src + ')')(); install();
+      const before = window.BS.enemies().length;
+      for (const e of window.BS.enemies().slice()) for (let i = 0; i < 6; i++) { e.hitT = 0; window.BS.hitEnemy(e); }
+      window.BS.updateMazeEnemies(1 / 120);   // the cull pass
+      return { before, after: window.BS.enemies().length };
+    }, installMinibossMaze.toString());
+    expect(r.before).toBe(2);
+    expect(r.after).toBe(0);   // both dead → gone (used to linger forever)
   });
 
   test('a full pair telegraphs then hurls a partner projectile that damages the hero', async ({ page }) => {
