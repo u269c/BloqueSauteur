@@ -1200,7 +1200,7 @@ function buildMazeLevel() {
   Game.theme = { world: 'shadow', sky: 'thunder' };   // PR-E gives this its B&W high-contrast look
   Game.levelData = genMaze(Game.level, Game.seed);
   Game.terrain = Game.levelData;
-  Game.cam.x = 0; Game.cam.y = 0;
+  Game.cam.x = 0; Game.cam.y = 0; Game.camSnap = true;   // entry cut, then smooth-follow
   Game.mazeExitReached = false;
   Game.keys = 0;                                        // diamond keys held (per maze run)
   Game.hitThisLevel = false;
@@ -1217,6 +1217,20 @@ function buildMazeLevel() {
     onGround: true, coyote: 0, jumpBuf: 0, jumping: false, hurt: 0, knock: 0, ghost: 0, dead: false,
     airJumps: 0, shieldT: 0, shieldCd: 0, dodgeT: 0, dodgeCd: 0, strong: false, frozen: 0, dizzy: 0, bigJump: 0, climbing: false,
   });
+}
+// Smooth 2D camera for the L6 maze: eases toward the hero instead of hard-snapping, so
+// climbing up into a new room scrolls smoothly. Called every frame INCLUDING during a climb
+// (the climb block returns early), which is what stops the "skip" on reaching the top.
+// Snaps instantly on level entry / respawn via Game.camSnap.
+function updateMazeCamera(dt) {
+  const mz = Game.terrain, C = CONFIG, h = Game.hero;
+  if (!mz || !mz.maze) return;
+  const tx = Math.max(0, Math.min(Math.max(0, mz.width - C.W), h.x - C.W / 2));
+  const ty = Math.max(0, Math.min(Math.max(0, mz.height - C.H), h.y - C.H * 0.55));
+  if (Game.camSnap) { Game.cam.x = tx; Game.cam.y = ty; Game.camSnap = false; return; }
+  const k = Math.min(1, 14 * dt);   // ease toward the target (keeps the hero ~centred, no jumps)
+  Game.cam.x += (tx - Game.cam.x) * k;
+  Game.cam.y += (ty - Game.cam.y) * k;
 }
 // Reaching the maze exit locks the camera into the shadow arena — the evil-hero boss duel.
 function onMazeExit() {
@@ -1383,7 +1397,7 @@ function enterBossArena() {
 function respawnHero() {
   const h = Game.hero, C = CONFIG;
   let sx, sy;
-  if (Game.terrain && Game.terrain.maze) { sx = Game.levelData.spawn.x; sy = Game.levelData.spawn.y; }   // maze: back to the entrance
+  if (Game.terrain && Game.terrain.maze) { sx = Game.levelData.spawn.x; sy = Game.levelData.spawn.y; Game.camSnap = true; }   // maze: back to the entrance (cut the camera)
   else if (Game.phase === 'traverse') { sx = findGroundX(Game.levelData, h.x); sy = groundTopAt(Game.levelData, sx) ?? Game.levelData.top; }
   else { sx = findSafeX(Game.terrain); sy = surfaceAt(Game.terrain, sx) ?? C.PLAT_Y; }
   Object.assign(h, {
@@ -2814,12 +2828,15 @@ function update(dt) {
       else if (Input.jumpHeld && !Input.down) { const above = near.filter((c) => c.top < h.y - 1); if (above.length) onClimb = above.reduce((b, c) => (c.top < b.top ? c : b)); }
     }
     if (h.climbing && (!onClimb || Input.left || Input.right)) h.climbing = false;   // dismount (fall back to normal control)
-    else if (onClimb && !h.climbing && (Input.jumpHeld || Input.down)) { h.climbing = true; h.x = onClimb.x; }
+    // Grab only when there's rope to travel: ↑ needs room ABOVE, ↓ room BELOW. So at the top
+    // perch ↑ no longer re-grabs (it falls through to a normal JUMP) — no more "stuck at top".
+    else if (onClimb && !h.climbing && ((Input.jumpHeld && h.y > onClimb.top + 4) || (Input.down && h.y < onClimb.bot - 4))) { h.climbing = true; h.x = onClimb.x; }
     if (h.climbing && onClimb) {
       h.vx = 0; h.vy = 0; h.onGround = false; h.jumpBuf = 0;
       h.y += ((Input.jumpHeld ? -1 : 0) + (Input.down ? 1 : 0)) * CLIMB_SPEED * dt;
-      if (h.y <= onClimb.top) { h.y = onClimb.top; h.climbing = false; h.onGround = true; }   // reached the top perch
+      if (h.y <= onClimb.top) { h.y = onClimb.top; h.climbing = false; h.onGround = true; }   // reached the top perch → stand (tap ↑ to jump, ←/→ to step aside)
       if (h.y > onClimb.bot) h.y = onClimb.bot;                                               // can't go below the ground
+      if (Game.terrain && Game.terrain.maze) updateMazeCamera(dt);                            // keep scrolling smoothly while climbing
       updatePickables(dt); updateHazards(); stepEnemies(dt); updateBoss(dt);
       return;
     }
@@ -2886,9 +2903,8 @@ function update(dt) {
   const lvl = Game.levelData;
   const maze = (Game.phase === 'traverse' && Game.terrain && Game.terrain.maze) ? Game.terrain : null;
   if (maze) {
-    // ── L6 labyrinth: 2D camera follow (clamped), fall-out death, exit marker ──
-    Game.cam.x = Math.max(0, Math.min(Math.max(0, maze.width - C.W), Math.round(h.x - C.W / 2)));
-    Game.cam.y = Math.max(0, Math.min(Math.max(0, maze.height - C.H), Math.round(h.y - C.H * 0.55)));
+    // ── L6 labyrinth: smooth 2D camera, fall-out death, exit marker ──
+    updateMazeCamera(dt);
     if (!h.dead && h.y >= maze.deathY) heroDie();
     else if (!h.dead && Math.abs(h.x - maze.exit.x) < 10 && h.y > maze.exit.y - 24 && h.y <= maze.exit.y + 4) { onMazeExit(); return; }   // → shadow arena; bail this frame
     if (!h.dead) updateMazeInteract(maze, h);
