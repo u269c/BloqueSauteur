@@ -168,7 +168,7 @@ test('enemies push apart instead of overlapping', async ({ page }) => {
   expect(r.after).toBeGreaterThanOrEqual(2 * r.r - 1);   // pushed apart to (roughly) non-overlap
 });
 
-test('red/yellow take 2 hits & enrage bloodshot; blue takes 3; clear dies in one (neg. control)', async ({ page }) => {
+test('yellow takes 2 hits & enrages bloodshot; blue takes 3; red & clear die in one (neg. control)', async ({ page }) => {
   await openGame(page);
   await page.evaluate(() => window.BS.freeze(true));
   const probe = (type) => page.evaluate((type) => {
@@ -183,12 +183,9 @@ test('red/yellow take 2 hits & enrage bloodshot; blue takes 3; clear dies in one
     return { maxHits, afterOne, dead: !e.alive };
   }, type);
   const red = await probe('red');
-  expect(red.maxHits).toBe(2);
-  expect(red.afterOne.alive).toBe(true);      // survives the first hit
-  expect(red.afterOne.blood).toBe(true);      // …turns bloodshot
-  expect(red.afterOne.homing).toBe(true);     // …and hunts the hero
-  expect(red.afterOne.spedUp).toBe(1.2);      // …at +20% speed
-  expect(red.dead).toBe(true);                // dies on the second hit
+  expect(red.maxHits).toBe(1);                // red is the fast rusher — one hit now (was too hard at 2)
+  expect(red.afterOne.alive).toBe(false);     // dies on the first hit
+  expect(red.afterOne.blood).toBe(false);     // …no time to enrage
   const yellow = await probe('yellow');
   expect(yellow.maxHits).toBe(2);
   expect(yellow.afterOne.blood).toBe(true);
