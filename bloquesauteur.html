@@ -1266,8 +1266,8 @@ function makeOrange(x, y, pairId, keyId, room) {
 function heroInRoom(room, h) { return room && h.x >= room.x0 && h.x <= room.x1 && h.y > room.y0 && h.y <= room.y1 + 4; }
 // Fire a mini-boss as a projectile toward the hero's current position.
 function launchMazeThrow(e, h) {
-  const spd = 250, dx = h.x - e.x, dy = (h.y - h.h / 2) - e.y, d = Math.hypot(dx, dy) || 1;
-  e.thrown = true; e.throwT = 0.8; e.tele = 0; e.role = 'idle';
+  const spd = 190, dx = h.x - e.x, dy = (h.y - h.h / 2) - e.y, d = Math.hypot(dx, dy) || 1;
+  e.thrown = true; e.throwT = 0.5; e.tele = 0; e.role = 'idle';   // shorter/softer so it can't be flung a whole room away
   e.throwVx = dx / d * spd; e.throwVy = dy / d * spd;
   Audio.sfx('bossSpawn'); spawnBurst(e.x, e.y - e.r, '#ff8a2c', 10); shake(3);
 }
@@ -1286,8 +1286,13 @@ function updateMazeEnemies(dt) {
 
     if (e.thrown) {                                 // ── in-flight projectile ──
       e.x += e.throwVx * dt; e.y += e.throwVy * dt; e.throwT -= dt;
+      const rm = e.room;
       if (h.ghost <= 0 && h.dodgeT <= 0 && h.hurt <= 0 && Math.abs(h.x - e.x) < e.r + 7 && Math.abs((h.y - h.h / 2) - e.y) < e.r + 9) { heroHurt(e.x > h.x); e.thrown = false; }
-      else if (e.throwT <= 0 || mazeSolidAt(mz, e.x + Math.sign(e.throwVx) * e.r, e.y) || mazeSolidAt(mz, e.x, e.y)) { e.thrown = false; e.vx = 0; e.vy = 0; }
+      else if (rm && (e.x < rm.x0 + e.r || e.x > rm.x1 - e.r || e.y < rm.y0 + e.r || e.y > rm.y1 - e.r)) {   // confine to the room — a partner can NEVER be flung out of reach
+        e.x = Math.max(rm.x0 + e.r, Math.min(rm.x1 - e.r, e.x)); e.y = Math.max(rm.y0 + e.r, Math.min(rm.y1 - e.r, e.y)); e.thrown = false;
+      }
+      else if (e.throwT <= 0 || mazeSolidAt(mz, e.x + Math.sign(e.throwVx) * e.r, e.y) || mazeSolidAt(mz, e.x, e.y)) { e.thrown = false; }
+      if (!e.thrown) { e.vx = 0; e.vy = 0; }
       continue;
     }
 
