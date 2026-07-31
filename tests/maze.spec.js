@@ -354,33 +354,30 @@ test.describe('L6 maze — orange mini-boss pairs', () => {
     expect(r.deadAfter6).toBe(true);
   });
 
-  test('defeating BOTH of a pair frees its key; while one lives the key stays locked (neg. control)', async ({ page }) => {
+  test('defeating BOTH of a pair AWARDS its key instantly; killing one keeps it locked (neg. control)', async ({ page }) => {
     await openGame(page); await enterPlayPanel(page, 0);
     const r = await page.evaluate((src) => {
       const install = new Function('return (' + src + ')')();
-      // NEGATIVE CONTROL: kill only ONE → key stays locked, uncollectible
+      // NEGATIVE CONTROL: kill only ONE → key stays locked, no key awarded (hero never even moves)
       install();
       let es = window.BS.enemies();
       for (let i = 0; i < 6; i++) { es[0].hitT = 0; window.BS.hitEnemy(es[0]); }
       window.BS.updateMazeEnemies(1 / 120);
       const mzA = window.BS.terrain();
-      const stillLocked = mzA.keys[0].locked === true && mzA.minibosses[0].freed === false;
+      const stillLocked = mzA.keys[0].locked === true && mzA.minibosses[0].freed === false && window.BS.mazeKeys() === 0;
 
-      // now kill BOTH → key frees
+      // kill BOTH → the key is awarded on the spot, WITHOUT walking to it
       install();
+      const heroX0 = window.BS.hero().x;
       es = window.BS.enemies();
       for (const e of es) for (let i = 0; i < 6; i++) { e.hitT = 0; window.BS.hitEnemy(e); }
       window.BS.updateMazeEnemies(1 / 120);
       const mz = window.BS.terrain(), key = mz.keys[0];
-      const freed = key.locked === false && mz.minibosses[0].freed === true;
-      // freed key is now collectible
-      Object.assign(window.BS.hero(), { x: key.x, y: key.y });
-      window.BS.updateMazeInteract(mz, window.BS.hero());
-      return { stillLocked, freed, collected: window.BS.mazeKeys() === 1 && key.taken };
+      return { stillLocked, awarded: key.taken === true && window.BS.mazeKeys() === 1, heroDidntMove: window.BS.hero().x === heroX0 };
     }, installMinibossMaze.toString());
-    expect(r.stillLocked).toBe(true);   // negative control
-    expect(r.freed).toBe(true);
-    expect(r.collected).toBe(true);
+    expect(r.stillLocked).toBe(true);   // negative control: one guard alive → locked, no key
+    expect(r.awarded).toBe(true);       // both dead → key in hand immediately
+    expect(r.heroDidntMove).toBe(true); // …no walk-over-the-drop needed
   });
 
   test('guards stay dormant until the hero enters their room (neg. control: outside = no chase)', async ({ page }) => {

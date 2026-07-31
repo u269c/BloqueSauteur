@@ -1319,13 +1319,18 @@ function updateMazeEnemies(dt) {
     }
   }
 
-  // defeating BOTH of a pair frees its diamond key
+  // defeating BOTH of a pair AWARDS its diamond key immediately (they were holding it — no
+  // fiddly walk-over-the-drop step to miss). Works wherever you are when the fight ends.
   for (const mb of mz.minibosses) {
     if (mb.freed) continue;
     if (!Game.enemies.some((e) => e.pairId === mb.pairId && e.alive)) {
       mb.freed = true;
       const key = mz.keys.find((k) => k.id === mb.keyId);
-      if (key) { key.locked = false; addFloater(key.x, key.y - 26, '◆ KEY FREED', '#8fd0ff'); spawnBurst(key.x, key.y - 8, '#8fd0ff', 18); shake(5); Audio.sfx('lifeUp'); }
+      if (key && !key.taken) {
+        key.locked = false; key.taken = true; Game.keys = (Game.keys | 0) + 1;
+        addFloater(Game.hero.x, Game.hero.y - 24, '◆ KEY GET!', '#8fd0ff');
+        spawnBurst(key.x, key.y - 8, '#8fd0ff', 20); shake(5); Audio.sfx('lifeUp');
+      }
     }
   }
 
