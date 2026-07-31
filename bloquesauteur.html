@@ -4046,6 +4046,45 @@ function drawPickle() {
 }
 
 // ══════════════════════════════════════════════════════════════════
+//  GAMEPAD — PS5 DualSense / Xbox / any standard controller
+// ══════════════════════════════════════════════════════════════════
+// Polled once per frame; emits Input.press() only on button EDGES, so a pad acts exactly
+// like the keyboard (variable-height jump included). Standard mapping: 0=✕/A · 1=○/B ·
+// 6/7=L2/R2 · 8=Share/Back · 9=Options/Start · 12-15=D-pad U/D/L/R · axes[0]/[1]=left stick.
+// ✕ or ↑ = jump · ○ / ↓ / R2 = the ↓ skill (shield / dive / climb-down) · Options = pause /
+// start · Share = mute · left stick or D-pad = move.
+const GP = { _prev: {} };
+function pollGamepad() {
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  let gp = null;
+  for (const p of pads) if (p && p.connected && p.buttons && p.buttons.length) { gp = p; break; }
+  if (!gp) return;
+  const b = gp.buttons, ax = gp.axes || [], down = (i) => !!(b[i] && b[i].pressed);
+  const x = ax[0] || 0, y = ax[1] || 0, playing = Game.scene === 'PLAY' || Game.scene === 'PICKLE';
+  const cur = {
+    left:    playing && (x < -0.45 || down(14)),
+    right:   playing && (x > 0.45 || down(15)),
+    jump:    playing && (down(0) || down(12) || y < -0.55),                       // ✕ / D-up / stick-up
+    down:    playing && (down(1) || down(13) || down(7) || down(6) || y > 0.55),  // ○ / D-down / triggers / stick-down
+    confirm: down(0) || down(9),    // ✕ or Options → start / advance menus
+    pause:   down(9),               // Options → pause
+    mute:    down(8),               // Share → mute
+  };
+  const p = GP._prev;
+  if ((cur.confirm && !p.confirm) || (cur.jump && !p.jump) || (cur.pause && !p.pause)) onFirstGesture();   // best-effort audio unlock
+  for (const a of ['left', 'right', 'jump', 'down']) if (cur[a] !== !!p[a]) Input.press(a, cur[a]);         // movement/skill as key-style edges
+  if (cur.pause && !p.pause) {                                                     // Options: pause in-game, or start from the title
+    if (Game.scene === 'PLAY' || Game.paused) togglePause();
+    else if (Game.scene === 'TITLE') startGame();
+  } else if (cur.confirm && !p.confirm) {                                          // ✕: start / advance transient screens
+    if (Game.scene === 'TITLE') startGame();
+    else if (Game.scene === 'INTRO' || Game.scene === 'CLEAR' || Game.scene === 'GAMEOVER' || Game.scene === 'VICTORY') tapAdvance();
+  }
+  if (cur.mute && !p.mute) Audio.toggleMute();
+  GP._prev = cur;
+}
+
+// ══════════════════════════════════════════════════════════════════
 //  LOOP — fixed timestep with accumulator; render every frame
 // ══════════════════════════════════════════════════════════════════
 let acc = 0, last = null, testFreeze = false;
@@ -4053,6 +4092,7 @@ function tick(now) {
   if (last === null) last = now;
   let el = (now - last) / 1000; last = now;
   if (el > 0.25) el = 0.25;                 // clamp huge gaps (tab was hidden)
+  if (!testFreeze) pollGamepad();           // controller input (skipped while tests drive physics manually)
   if (testFreeze) { /* physics driven manually by BS.stepFixed in tests */ }
   else if (Game.scene === 'PLAY' && !Game.paused) {
     acc += el;
@@ -4144,7 +4184,7 @@ window.BS = {
   activateBoss,
   bossHit: () => Game.boss && bossHit(Game.boss),
   addKill,
-  Input,
+  Input, pollGamepad,
   audioState: () => (Audio.ctx ? Audio.ctx.state : 'none'),
   musicKey: () => Audio.music.key,
   musicRate: () => Audio.music.rate,
