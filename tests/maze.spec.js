@@ -192,7 +192,8 @@ test.describe('L6 maze — seeded generation', () => {
         maze: true, level: 6, seed: 1, cols, rows, tileW: T, width: cols * T, height: rows * T, grid,
         climbables: [{ x: 3.5 * T, top: 4 * T, bot: 9 * T, kind: 'pole' }, { x: 3.5 * T, top: 9 * T, bot: 14 * T, kind: 'ladder' }],
         hazards: [], chests: [], floats: [], enemies: [], doors: [], keysNeeded: 0, minibosses: [],
-        spawn: { x: 1.5 * T, y: 9 * T }, exit: { x: 4 * T, y: 4 * T }, deathY: rows * T,
+        // exit kept far from the shaft column (col 3, x=56) so climbing to the top can't trip it
+        spawn: { x: 1.5 * T, y: 9 * T }, exit: { x: 1.5 * T, y: 4 * T }, deathY: rows * T,
       };
       const st = window.BS.state(); st.terrain = mz; st.levelData = mz; st.phase = 'traverse'; st.scene = 'PLAY'; st.paused = false;
       window.BS.freeze(true); window.BS.Input.reset();
@@ -218,14 +219,15 @@ test.describe('L6 maze — seeded generation', () => {
   test('the 2D camera follows the hero in X and Y and clamps to the maze bounds', async ({ page }) => {
     await enterMaze(page);
     const r = await page.evaluate(() => {
-      const h = window.BS.hero(), mz = window.BS.terrain(), C = window.BS.CONFIG, o = {};
-      Object.assign(h, { x: 40, y: 40, vx: 0, vy: 0 }); window.BS.step(1 / 120);
-      o.tl = { x: window.BS.cam().x, y: window.BS.cam().y };
-      Object.assign(h, { x: mz.width - 20, y: mz.height - 20, vx: 0, vy: 0 }); window.BS.step(1 / 120);
+      const h = window.BS.hero(), mz = window.BS.terrain(), C = window.BS.CONFIG, st = window.BS.state(), o = {};
+      const snapStep = () => { st.camSnap = true; window.BS.step(1 / 120); };   // snap so we check the clamp target, not the ease
+      Object.assign(h, { x: 40, y: 40, vx: 0, vy: 0 }); snapStep();
+      o.tl = { x: Math.round(window.BS.cam().x), y: Math.round(window.BS.cam().y) };
+      Object.assign(h, { x: mz.width - 20, y: mz.height - 20, vx: 0, vy: 0 }); snapStep();
       const cam = window.BS.cam();
       o.brX = cam.x >= mz.width - C.W - 2 && cam.x <= mz.width - C.W + 0.5;
       o.brY = cam.y >= mz.height - C.H - 2 && cam.y <= mz.height - C.H + 0.5;
-      Object.assign(h, { x: mz.width / 2, y: mz.height / 2, vx: 0, vy: 0 }); window.BS.step(1 / 120);
+      Object.assign(h, { x: mz.width / 2, y: mz.height / 2, vx: 0, vy: 0 }); snapStep();
       o.midY = window.BS.cam().y;
       return o;
     });
@@ -530,5 +532,78 @@ test.describe('L6 maze — doors + diamond keys', () => {
     expect(r.doorOpen).toBe(true);
     expect(r.passed).toBe(true);         // walked through after unlocking
     expect(r.keysLeft).toBe(0);          // the key was spent
+  });
+});
+
+// A single tall rope shaft between a bottom floor (row 16) and a top floor (row 4).
+function installClimbMaze() {
+  const T = 16, cols = 8, rows = 20;
+  const grid = new Uint8Array(cols * rows);
+  const S = (tx, ty) => { grid[ty * cols + tx] = 1; };
+  for (let ty = 0; ty < rows; ty++) { S(0, ty); S(cols - 1, ty); }
+  for (let tx = 0; tx < cols; tx++) { S(tx, 0); S(tx, rows - 1); }
+  for (let tx = 1; tx < cols - 1; tx++) { S(tx, 4); S(tx, 16); }        // top + bottom floors
+  const climb = { x: 4 * T + T / 2, top: 4 * T, bot: 16 * T, kind: 'rope' };
+  const mz = {
+    maze: true, level: 6, seed: 1, cols, rows, tileW: T, width: cols * T, height: rows * T, grid,
+    climbables: [climb], hazards: [], chests: [], floats: [], enemies: [], doors: [], keys: [], keysNeeded: 0, minibosses: [],
+    spawn: { x: 2 * T, y: 16 * T }, exit: { x: 6 * T, y: 4 * T }, deathY: rows * T,
+  };
+  const st = window.BS.state();
+  st.terrain = mz; st.levelData = mz; st.phase = 'traverse'; st.scene = 'PLAY'; st.paused = false; st.camSnap = true;
+  window.BS.freeze(true); window.BS.Input.reset();
+  return { T, climb };
+}
+
+test.describe('L6 maze — climbing + camera', () => {
+  test('the camera scrolls smoothly while climbing (no skip on reaching the top)', async ({ page }) => {
+    await openGame(page); await enterPlayPanel(page, 0);
+    const r = await page.evaluate((src) => {
+      const install = new Function('return (' + src + ')')(); const { climb } = install();
+      const h = window.BS.hero();
+      Object.assign(h, { x: climb.x, y: climb.bot, vx: 0, vy: 0, climbing: false, onGround: true });
+      window.BS.Input.press('jump', true);   // hold up to climb
+      window.BS.step(1 / 120);                // warm-up: consumes camSnap
+      let climbedFrames = 0, maxDelta = 0;
+      const camY0 = window.BS.cam().y;
+      for (let i = 0; i < 240; i++) {
+        const before = window.BS.cam().y;
+        window.BS.step(1 / 120);
+        maxDelta = Math.max(maxDelta, Math.abs(window.BS.cam().y - before));
+        if (h.climbing) climbedFrames++;
+      }
+      window.BS.Input.reset();
+      return { climbedFrames, maxDelta, camPannedUp: camY0 - window.BS.cam().y };
+    }, installClimbMaze.toString());
+    expect(r.climbedFrames).toBeGreaterThan(20);   // it actually climbed
+    expect(r.camPannedUp).toBeGreaterThan(30);     // the camera followed up the shaft
+    expect(r.maxDelta).toBeLessThan(12);           // …with no single-frame jump (the "skip" bug)
+  });
+
+  test('at the top you can jump: holding UP does not re-grab, and a tap jumps off', async ({ page }) => {
+    await openGame(page); await enterPlayPanel(page, 0);
+    const r = await page.evaluate((src) => {
+      const install = new Function('return (' + src + ')')(); const { climb } = install();
+      const h = window.BS.hero();
+      Object.assign(h, { x: climb.x, y: climb.bot, vx: 0, vy: 0, climbing: false, onGround: true });
+      window.BS.Input.press('jump', true);   // hold up to climb to the top
+      let reachedTop = false;
+      for (let i = 0; i < 400 && !reachedTop; i++) { window.BS.step(1 / 120); if (Math.abs(h.y - climb.top) < 2 && !h.climbing) reachedTop = true; }
+      // STILL holding up at the top — must NOT re-grab (this was the "stuck" bug)
+      let reGrabbed = false;
+      for (let i = 0; i < 30; i++) { window.BS.step(1 / 120); if (h.climbing) reGrabbed = true; }
+      const standingAtTop = Math.abs(h.y - climb.top) < 2 && !h.climbing && h.onGround;
+      // now tap jump (release → press) → the hero jumps off the top
+      window.BS.Input.reset(); window.BS.step(1 / 120);
+      window.BS.Input.press('jump', true);
+      let jumped = false;
+      for (let i = 0; i < 24 && !jumped; i++) { window.BS.step(1 / 120); if (h.y < climb.top - 6 && !h.onGround) jumped = true; }
+      window.BS.Input.reset();
+      return { reachedTop, reGrabbed, standingAtTop, jumped };
+    }, installClimbMaze.toString());
+    expect(r.reachedTop).toBe(true);
+    expect(r.reGrabbed).toBe(false);      // the fix: holding up at the top no longer re-grabs the rope
+    expect(r.standingAtTop).toBe(true);
+    expect(r.jumped).toBe(true);          // …and you can jump straight off it
   });
 });
