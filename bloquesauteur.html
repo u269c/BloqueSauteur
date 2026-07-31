@@ -3222,6 +3222,21 @@ function drawMazeKey(k) {
   }
   ctx.restore();
 }
+// A rounded-rect path (per-corner radii), used to soften platform ends against the sky.
+function roundRectPath(x, y, w, h, rtl, rtr, rbr, rbl) {
+  const m = Math.min(w, h) / 2;
+  rtl = Math.min(rtl, m); rtr = Math.min(rtr, m); rbr = Math.min(rbr, m); rbl = Math.min(rbl, m);
+  ctx.beginPath();
+  ctx.moveTo(x + rtl, y);
+  ctx.lineTo(x + w - rtr, y); ctx.arcTo(x + w, y, x + w, y + rtr, rtr);
+  ctx.lineTo(x + w, y + h - rbr); ctx.arcTo(x + w, y + h, x + w - rbr, y + h, rbr);
+  ctx.lineTo(x + rbl, y + h); ctx.arcTo(x, y + h, x, y + h - rbl, rbl);
+  ctx.lineTo(x, y + rtl); ctx.arcTo(x, y, x + rtl, y, rtl);
+  ctx.closePath();
+}
+// Worlds whose platforms already have soft/organic edges (and draw ABOVE the surface line),
+// so the rounded-end clip is skipped for them.
+const SEG_ROUND_SKIP = new Set(['skyClouds', 'ropeBridge']);
 // True on Level 6 in either phase (maze traverse or the shadow boss arena) → B&W rendering.
 function shadowLevel() { return Game.level === MAZE_LEVEL; }
 const SHADOW_DECO = { body: '#b9bdc6', edge: '#ffffff', hi: '#ffffff', brick: '#5a5e66' };   // light B&W stone
@@ -3229,9 +3244,18 @@ function drawTerrain() {
   const ter = Game.terrain; if (!ter) return;
   if (ter.maze) { drawMaze(ter); return; }
   const world = Game.theme.world, d = shadowLevel() ? SHADOW_DECO : (WORLDS[world] || WORLDS.classic).deco, fn = shadowLevel() ? null : SEG_RENDER[world];
-  // Holes (gaps between segments) stay open → sky/hazard shows through.
+  // Holes (gaps between segments) stay open → sky/hazard shows through. Round the platform
+  // TOP corners against the sky so the ends don't cut off in a hard vertical edge.
   const segs = ter.traverse ? ter.ground : ter.segments;
-  for (const s of segs) { if (fn) fn(s, d); else segDefault(s, d); }
+  const roundEnds = !SEG_ROUND_SKIP.has(world);
+  for (const s of segs) {
+    if (roundEnds) {
+      const w = s.x1 - s.x0, r = Math.min(7, w / 2);
+      ctx.save(); roundRectPath(s.x0, s.top, w, CONFIG.H - s.top, r, r, 0, 0); ctx.clip();
+      if (fn) fn(s, d); else segDefault(s, d);
+      ctx.restore();
+    } else if (fn) fn(s, d); else segDefault(s, d);
+  }
   if (ter.traverse && ter.climbables) for (const c of ter.climbables) drawClimbable(c);
   if (ter.traverse && ter.hazards) for (const hz of ter.hazards) drawHazardObj(hz);
   if (ter.traverse) for (const f of ter.floats) drawFloat(f, d);
@@ -3407,8 +3431,11 @@ FLOAT_RENDER.mansion = FLOAT_RENDER.wood;
 function drawFloat(f, d) {
   const fn = FLOAT_RENDER[Game.theme.world];
   if (fn) { fn(f, d); return; }
+  const r = Math.min(4, f.w / 2);                  // suspended slab → round all four corners
+  ctx.save(); roundRectPath(f.x, f.y, f.w, FLOAT_H, r, r, r, r); ctx.clip();
   floatBase(f, d.body, d.edge, d.hi);              // themed slab (poison / wine / beach / bathtub)
   ctx.fillStyle = d.brick; for (let bx = f.x + 5; bx < f.x + f.w - 3; bx += 8) ctx.fillRect(bx, f.y + 4, 1, FLOAT_H - 6);
+  ctx.restore();
 }
 
 function heroColor(h) {
