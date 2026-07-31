@@ -433,6 +433,41 @@ test.describe('L6 maze — orange mini-boss pairs', () => {
     expect(r.tookDamage).toBe(true);    // and it (or contact) chipped the hero
   });
 
+  test('a thrown partner is confined to the pair room — even aimed through an open doorway', async ({ page }) => {
+    await openGame(page); await enterPlayPanel(page, 0);
+    const r = await page.evaluate(() => {
+      const BS = window.BS, T = 16, cols = 24, rows = 10, fr = 7;
+      const grid = new Uint8Array(cols * rows); const S = (tx, ty) => { grid[ty * cols + tx] = 1; };
+      for (let ty = 0; ty < rows; ty++) { S(0, ty); S(cols - 1, ty); }
+      for (let tx = 0; tx < cols; tx++) { S(tx, 0); S(tx, rows - 1); }
+      for (let tx = 1; tx < cols - 1; tx++) S(tx, fr);                    // floor across BOTH rooms
+      for (let ty = 1; ty < fr; ty++) S(11, ty);                          // dividing wall (col 11)…
+      for (let ty = fr - 3; ty < fr; ty++) grid[ty * cols + 11] = 0;      // …with an open doorway at floor level
+      const room = { x0: 0, x1: 11 * T, y0: 0, y1: rows * T };            // LEFT room only
+      const mz = {
+        maze: true, level: 6, cols, rows, tileW: T, width: cols * T, height: rows * T, grid,
+        climbables: [], hazards: [], chests: [], floats: [], enemies: [], doors: [], keys: [], keysNeeded: 0,
+        minibosses: [{ pairId: 0, keyId: 0, freed: false, room, a: { x: 5 * T, y: fr * T }, b: { x: 7 * T, y: fr * T } }],
+        spawn: { x: 2 * T, y: fr * T }, exit: { x: 22 * T, y: fr * T }, deathY: rows * T,
+      };
+      const st = BS.state(); st.terrain = mz; st.levelData = mz; st.phase = 'traverse'; st.scene = 'PLAY'; st.paused = false;
+      st.enemies.length = 0;
+      const a = BS.makeOrange(5 * T, fr * T, 0, 0, room), b = BS.makeOrange(7 * T, fr * T, 0, 0, room);
+      st.enemies.push(a, b);
+      BS.freeze(true); BS.Input.reset();
+      // hero ghostly at the doorway so the throw aims RIGHT through it and can't hit him
+      Object.assign(BS.hero(), { x: 10 * T, y: fr * T, vx: 0, vy: 0, onGround: true, ghost: 9, dodgeT: 0 });
+      a.awake = b.awake = true; a.onGround = b.onGround = true;
+      b.role = 'proj'; b.tele = 0.001;                                    // fling partner b at the hero (through the doorway)
+      let everThrown = false, leftRoom = false;
+      for (let i = 0; i < 240; i++) { BS.updateMazeEnemies(1 / 120); if (b.thrown) { everThrown = true; if (b.x > room.x1 || b.x < room.x0) leftRoom = true; } }
+      return { everThrown, leftRoom, endedInRoom: b.x <= room.x1 && b.x >= room.x0 && b.alive };
+    });
+    expect(r.everThrown).toBe(true);
+    expect(r.leftRoom).toBe(false);      // never crossed into the next room (the bug)
+    expect(r.endedInRoom).toBe(true);    // still in the room → the pair is finishable
+  });
+
   test('a thrown projectile is what deals the hit (neg. control: a grounded one at range does not)', async ({ page }) => {
     await openGame(page); await enterPlayPanel(page, 0);
     const r = await page.evaluate((src) => {
