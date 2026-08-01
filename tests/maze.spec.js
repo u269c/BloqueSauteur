@@ -662,3 +662,76 @@ test.describe('L6 maze — climbing + camera', () => {
     expect(r.jumped).toBe(true);          // …and you can jump straight off it
   });
 });
+
+// A flat corridor with walls at both ends, for ambient patrol/chase tests.
+function installCorridorMaze() {
+  const T = 16, cols = 20, rows = 8, fr = 5;
+  const grid = new Uint8Array(cols * rows);
+  const S = (tx, ty) => { grid[ty * cols + tx] = 1; };
+  for (let ty = 0; ty < rows; ty++) { S(0, ty); S(cols - 1, ty); }
+  for (let tx = 0; tx < cols; tx++) { S(tx, 0); S(tx, rows - 1); }
+  for (let tx = 1; tx < cols - 1; tx++) S(tx, fr);
+  const mz = {
+    maze: true, level: 6, cols, rows, tileW: T, width: cols * T, height: rows * T, grid,
+    climbables: [], hazards: [], chests: [], floats: [], enemies: [], doors: [], keys: [], minibosses: [],
+    spawn: { x: 2 * T, y: fr * T }, exit: { x: 18 * T, y: fr * T }, deathY: rows * T,
+  };
+  const st = window.BS.state(); st.terrain = mz; st.levelData = mz; st.phase = 'traverse'; st.scene = 'PLAY'; st.paused = false;
+  st.enemies.length = 0; window.BS.freeze(true); window.BS.Input.reset();
+  return { T, fr, cols };
+}
+
+test.describe('L6 maze — ambient corridor monsters', () => {
+  test('genMaze scatters ambient red/yellow/blue monsters (no clear/orange)', async ({ page }) => {
+    await openGame(page);
+    const r = await page.evaluate(() => {
+      let any = false, ok = true;
+      for (let s = 1; s <= 20; s++) {
+        const mz = window.BS.genMaze(6, s * 40503 >>> 0);
+        if (mz.enemies.length > 0) any = true;
+        for (const p of mz.enemies) if (!['red', 'yellow', 'blue'].includes(p.type)) ok = false;
+      }
+      return { any, ok };
+    });
+    expect(r.any).toBe(true);          // corridors get a few monsters
+    expect(r.ok).toBe(true);           // only red / yellow / blue
+  });
+
+  test('a patrolling monster roams the corridor and reverses at walls (never leaves it)', async ({ page }) => {
+    await openGame(page); await enterPlayPanel(page, 0);
+    const r = await page.evaluate((src) => {
+      const install = new Function('return (' + src + ')')(); const { T, fr, cols } = install();
+      const e = window.BS.makeMazeAmbient(3 * T, fr * T, 'red'); e.dir = -1;
+      window.BS.enemies().push(e);
+      window.BS.hero().x = 500 * T;   // hero far away
+      let minX = e.x, maxX = e.x, reversed = false, prev = e.dir;
+      for (let i = 0; i < 700; i++) { window.BS.updateMazeEnemies(1 / 120); minX = Math.min(minX, e.x); maxX = Math.max(maxX, e.x); if (e.dir !== prev) reversed = true; prev = e.dir; }
+      return { reversed, inBounds: minX >= 1 * T && maxX <= (cols - 1) * T, alive: e.alive };
+    }, installCorridorMaze.toString());
+    expect(r.reversed).toBe(true);     // bounced off a wall and turned around
+    expect(r.inBounds).toBe(true);     // stayed inside the corridor
+    expect(r.alive).toBe(true);
+  });
+
+  test('a blue monster chases the hero when close; takes 3 stomps (neg. control: red takes 1)', async ({ page }) => {
+    await openGame(page); await enterPlayPanel(page, 0);
+    const r = await page.evaluate((src) => {
+      const install = new Function('return (' + src + ')')(); const { T, fr } = install();
+      const blue = window.BS.makeMazeAmbient(10 * T, fr * T, 'blue'); window.BS.enemies().push(blue);
+      Object.assign(window.BS.hero(), { x: 5 * T, y: fr * T });   // hero to the LEFT, within range
+      const x0 = blue.x;
+      for (let i = 0; i < 120; i++) window.BS.updateMazeEnemies(1 / 120);
+      const chasedLeft = blue.x < x0 - 10;
+      // hit counts
+      const b2 = window.BS.makeMazeAmbient(2 * T, fr * T, 'blue'), r1 = window.BS.makeMazeAmbient(2 * T, fr * T, 'red');
+      for (let i = 0; i < 2; i++) { b2.hitT = 0; window.BS.hitEnemy(b2); }
+      const blueAlive2 = b2.alive; b2.hitT = 0; window.BS.hitEnemy(b2);
+      r1.hitT = 0; window.BS.hitEnemy(r1);
+      return { chasedLeft, blueAlive2, blueDead3: !b2.alive, redDead1: !r1.alive };
+    }, installCorridorMaze.toString());
+    expect(r.chasedLeft).toBe(true);   // blue homes toward the hero
+    expect(r.blueAlive2).toBe(true);   // survives 2 hits…
+    expect(r.blueDead3).toBe(true);    // …dies on the 3rd
+    expect(r.redDead1).toBe(true);     // negative control: red dies in one
+  });
+});
