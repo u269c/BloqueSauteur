@@ -96,6 +96,55 @@ test.describe('gamepad (PS5 / standard mapping)', () => {
   });
 });
 
+// Open the merchant with the grid built + a mock pad installed; freeze the loop.
+async function openShopWithPad(page) {
+  await page.evaluate(() => {
+    const st = window.BS.state(); st.level = 1; window.BS.setMode('normal'); st.points = 999;
+    window.BS.gotoShop(); window.BS.buildShop();
+    window.__pad = { connected: true, mapping: 'standard', id: 'DualSense', buttons: Array.from({ length: 17 }, () => ({ pressed: false, value: 0 })), axes: [0, 0, 0, 0] };
+    navigator.getGamepads = () => [window.__pad];
+    window.BS.freeze(true);
+  });
+}
+const cells = (page) => page.evaluate(() => document.querySelectorAll('#shop-grid .shop-item').length);
+
+test.describe('merchant · controller navigation', () => {
+  test('L1/R1 switch tabs (Skills ↔ Healing ↔ Costumes)', async ({ page }) => {
+    await openGame(page); await enterPlayPanel(page, 0); await openShopWithPad(page);
+    expect(await page.evaluate(() => window.BS.state().shopTab)).toBe('skills');
+    await poll(page, { buttons: [5] });                    // R1 → next
+    expect(await page.evaluate(() => window.BS.state().shopTab)).toBe('healing');
+    await poll(page, { buttons: [] }); await poll(page, { buttons: [5] });   // R1 → next
+    expect(await page.evaluate(() => window.BS.state().shopTab)).toBe('costumes');
+    await poll(page, { buttons: [] }); await poll(page, { buttons: [4] });   // L1 → prev
+    expect(await page.evaluate(() => window.BS.state().shopTab)).toBe('healing');
+  });
+
+  test('the costumes tab shows every costume (widened window)', async ({ page }) => {
+    await openGame(page); await enterPlayPanel(page, 0); await openShopWithPad(page);
+    await poll(page, { buttons: [5] }); await poll(page, { buttons: [] }); await poll(page, { buttons: [5] });   // → costumes
+    const n = await cells(page), total = await page.evaluate(() => window.BS.COSTUMES.length);
+    expect(n).toBeGreaterThanOrEqual(total - 1);   // all costumes present (bandana may be earn-only)
+  });
+
+  test('d-pad moves the cursor and ✕ buys the selected item', async ({ page }) => {
+    await openGame(page); await enterPlayPanel(page, 0); await openShopWithPad(page);
+    await poll(page, { buttons: [15] });                   // D-right → cursor to item 1
+    expect(await page.evaluate(() => window.BS.state().shopSel)).toBe(1);
+    const key = await page.evaluate(() => document.querySelectorAll('#shop-grid .shop-item')[window.BS.state().shopSel].dataset.key);
+    await page.evaluate(() => { window.BS.state().owned[document.querySelectorAll('#shop-grid .shop-item')[window.BS.state().shopSel].dataset.key] = false; });
+    await poll(page, { buttons: [] }); await poll(page, { buttons: [0] });   // ✕ → buy
+    expect(await page.evaluate((k) => !!window.BS.state().owned[k], key)).toBe(true);
+    expect(await page.evaluate(() => window.BS.state().points)).toBeLessThan(999);   // spent points
+  });
+
+  test('○ leaves the merchant', async ({ page }) => {
+    await openGame(page); await enterPlayPanel(page, 0); await openShopWithPad(page);
+    await poll(page, { buttons: [1] });                    // ○ → leave
+    expect(await page.evaluate(() => window.BS.merchant() && window.BS.merchant().state)).toBe('ascend');
+  });
+});
+
 // A pad whose vibration actuator records every playEffect call.
 async function installHapticPad(page) {
   await page.evaluate(() => {

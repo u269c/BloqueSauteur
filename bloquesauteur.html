@@ -151,7 +151,7 @@
   .slot-card .slot-del.confirm { color:#fff; background:#e0392f; border-radius:4px; padding:1px 6px; font-size:min(2.8vmin,11px); font-weight:700; }
 
   /* Merchant shop */
-  .shop-bubble { background:#faf3e0; color:#2a2320; border:3px solid #2a2320; border-radius:18px; padding:3vmin; max-width:min(92vw,520px); box-shadow:0 6px 0 rgba(0,0,0,0.3); }
+  .shop-bubble { background:#faf3e0; color:#2a2320; border:3px solid #2a2320; border-radius:18px; padding:3vmin; max-width:min(95vw,660px); box-shadow:0 6px 0 rgba(0,0,0,0.3); }
   /* comic-book speech bubble (the Challenger prompt): rounded white body + a pointer tail */
   .speech-bubble { position:relative; background:#fffaf0; color:#1a1a1a; border:4px solid #1a1a1a; border-radius:28px; padding:3.4vmin 3.4vmin 3.8vmin; max-width:min(86vw,380px); box-shadow:0 8px 0 rgba(0,0,0,0.28); text-align:center; }
   .speech-bubble p { color:#1a1a1a; font-weight:800; max-width:none; margin:0 0 2.2vmin; }
@@ -168,7 +168,8 @@
   .shop-tab.sel { color:#2a2320; background:#fffaf0; border-color:#2a2320; border-bottom-color:#fffaf0; }
   .shop-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:2vmin; max-height:52vh; overflow-y:auto; padding-right:1vmin; }
   /* costumes: a wide, compact table — every costume visible at once, no scrolling */
-  .shop-grid.wide { grid-template-columns:repeat(7,1fr); gap:1.1vmin; max-height:none; overflow:visible; padding-right:0; }
+  .shop-grid.wide { grid-template-columns:repeat(6,1fr); gap:1.1vmin; max-height:50vh; overflow-y:auto; padding-right:1vmin; }
+  .shop-item.cursor { outline:3px solid #2e6b3a; outline-offset:2px; box-shadow:0 0 0 2px #fffaf0, 0 0 10px rgba(46,107,58,0.55); }   /* controller cursor */
   .shop-item { background:#fffaf0; border:2px solid #cdbfa0; border-radius:12px; padding:1.6vmin 1vmin; text-align:center; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:.6vmin; }
   .shop-item:hover:not(.disabled) { border-color:#2e6b3a; background:#f2fbef; }
   .shop-item canvas { image-rendering:pixelated; width:min(11vmin,52px); height:min(11vmin,52px); }
@@ -1767,6 +1768,32 @@ function itemOwned(key) { const cid = costumeIdOf(key); return cid != null ? Gam
 function shopCatalogue() {
   return SHOP_ITEMS.concat(COSTUMES.filter((c) => c.price < 900).map((c) => ({ key: costumeKey(c.id), name: c.name, price: c.price, tab: 'costumes', blurb: 'Costume: ' + c.name })));   // price>=900 = earned only (Bandana)
 }
+// ── Merchant controller navigation (also usable with the keyboard/mouse) ──
+// A cursor over the shop grid: ←/→ move within a row, ↑/↓ by a row, ✕ buys, ○ leaves,
+// L1/R1 switch tabs. Mouse clicks still work independently.
+function shopCells() { const g = document.getElementById('shop-grid'); return g ? Array.from(g.querySelectorAll('.shop-item')) : []; }
+function shopCols() { return Game.shopTab === 'costumes' ? 6 : 3; }
+function highlightShopSel() {
+  const cells = shopCells(); if (!cells.length) return;
+  Game.shopSel = Math.max(0, Math.min(cells.length - 1, Game.shopSel | 0));
+  cells.forEach((c, i) => c.classList.toggle('cursor', i === Game.shopSel));
+  const sel = cells[Game.shopSel]; if (sel && sel.scrollIntoView) sel.scrollIntoView({ block: 'nearest' });
+}
+function shopMoveSel(delta) {
+  const n = shopCells().length; if (!n) return;
+  Game.shopSel = Math.max(0, Math.min(n - 1, (Game.shopSel | 0) + delta));
+  highlightShopSel();
+}
+function shopSwitchTab(dir) {
+  const ids = SHOP_TABS.map((t) => t[0]); let i = ids.indexOf(Game.shopTab); if (i < 0) i = 0;
+  Game.shopTab = ids[(i + dir + ids.length) % ids.length]; Game.shopSel = 0; buildShop(); Audio.sfx('buy');
+}
+function shopBuySel() {
+  const sel = shopCells()[Game.shopSel | 0]; if (!sel) return;
+  if (sel.classList.contains('owned') || sel.classList.contains('poor')) { Audio.sfx('buzz'); return; }
+  buyItem(sel.dataset.key);   // rebuilds the grid
+  highlightShopSel();
+}
 function buyItem(key) {
   const item = shopCatalogue().find((i) => i.key === key); if (!item) return;
   if (itemOwned(key) || Game.points < item.price) return;
@@ -1817,6 +1844,7 @@ function buildShop() {
     if (!owned && !poor) cell.addEventListener('click', (e) => { e.preventDefault(); onFirstGesture(); buyItem(item.key); });
     grid.appendChild(cell);
   }
+  highlightShopSel();   // keep the controller cursor visible after any rebuild
 }
 
 function updateHudButtons() {
@@ -2018,7 +2046,7 @@ function afterClear() { gotoShop(); }              // merchant visits after ever
 
 const HEALING_KEYS = ['halfHeart', 'heart', 'twoHearts', 'fullHeal', 'regen'];
 function gotoShop() {
-  Game.scene = 'SHOP'; Game.sceneT = 0; Game.paused = false; Game.shopTab = 'skills';
+  Game.scene = 'SHOP'; Game.sceneT = 0; Game.paused = false; Game.shopTab = 'skills'; Game.shopSel = 0;
   for (const k of HEALING_KEYS) Game.owned[k] = false;   // health items refresh — buyable once per level (max-hearts already banked in heartsBought)
   Game.merchant = {
     x: 40 + Math.random() * (CONFIG.W - 80), y: -34,
@@ -4189,9 +4217,26 @@ function pollGamepad() {
     confirm: down(0) || down(9),    // ✕ or Options → start / advance menus
     pause:   down(9),               // Options → pause
     mute:    down(8),               // Share → mute
+    // raw (ungated) buttons for menu navigation
+    x0: down(0), circle: down(1), l1: down(4), r1: down(5),
+    mLeft: down(14) || x < -0.5, mRight: down(15) || x > 0.5, mUp: down(12) || y < -0.5, mDown: down(13) || y > 0.5,
   };
   const p = GP._prev;
-  if ((cur.confirm && !p.confirm) || (cur.jump && !p.jump) || (cur.pause && !p.pause)) onFirstGesture();   // best-effort audio unlock
+  if ((cur.confirm && !p.confirm) || (cur.jump && !p.jump) || (cur.pause && !p.pause) || (cur.x0 && !p.x0)) onFirstGesture();   // best-effort audio unlock
+
+  // ── Merchant: full controller navigation (L1/R1 tabs · d-pad/stick cursor · ✕ buy · ○ leave) ──
+  if (Game.scene === 'SHOP' && !Game.paused) {
+    if (cur.l1 && !p.l1) shopSwitchTab(-1);
+    if (cur.r1 && !p.r1) shopSwitchTab(1);
+    if (cur.mLeft && !p.mLeft) shopMoveSel(-1);
+    if (cur.mRight && !p.mRight) shopMoveSel(1);
+    if (cur.mUp && !p.mUp) shopMoveSel(-shopCols());
+    if (cur.mDown && !p.mDown) shopMoveSel(shopCols());
+    if (cur.x0 && !p.x0) shopBuySel();
+    if (cur.circle && !p.circle) closeShop();
+    GP._prev = cur;
+    return;
+  }
   for (const a of ['left', 'right', 'jump', 'down']) if (cur[a] !== !!p[a]) Input.press(a, cur[a]);         // movement/skill as key-style edges
   if (cur.pause && !p.pause) {                                                     // Options: pause in-game, or start from the title
     if (Game.scene === 'PLAY' || Game.paused) togglePause();
