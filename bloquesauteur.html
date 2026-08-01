@@ -946,10 +946,24 @@ function genMaze(level, seed) {
   // Locked doors along the solution path + one diamond key per door, each key placed so it's
   // reachable BEFORE the door it opens (keeps the maze solvable — proven by mazeSolvable).
   const { doors, keys, minibosses } = placeMazeGates({ grid, links, rand, CW, CH, cw, ch, T, cols, startV, exitV, floorRowOf });
+  // Scatter a few ambient monsters (red / yellow / blue) through the corridors — one per room
+  // at most, skipping the spawn, exit and mini-boss rooms.
+  const enemies = [], AMB = ['red', 'yellow', 'blue'];
+  const reserved = new Set([startV, exitV]);
+  for (const mb of minibosses) reserved.add(cellV(Math.floor(mb.room.x0 / (cw * T)), Math.floor(mb.room.y0 / (ch * T))));
+  const nAmb = Math.round(CW * CH * 0.16);
+  for (let placed = 0, tries = 0; placed < nAmb && tries < 500; tries++) {
+    const cx = Math.floor(rand() * CW), cy = Math.floor(rand() * CH), v = cellV(cx, cy);
+    if (reserved.has(v)) continue;
+    reserved.add(v);
+    const fr = floorRowOf(cy), tx = cx * cw + 1 + Math.floor(rand() * (cw - 2));
+    enemies.push({ x: tx * T + T / 2, y: fr * T, type: AMB[Math.floor(rand() * AMB.length)] });
+    placed++;
+  }
   return {
     maze: true, level, seed: seed >>> 0,
     cols, rows, tileW: T, width: cols * T, height: rows * T, grid,
-    climbables, hazards: [], chests: [], floats: [], enemies: [],
+    climbables, hazards: [], chests: [], floats: [], enemies,
     doors, keys, keysNeeded: doors.length, minibosses,
     cells: { CW, CH, cw, ch, links },
     spawn, exit,
@@ -1213,6 +1227,7 @@ function buildMazeLevel() {
     Game.enemies.push(makeOrange(mb.a.x, mb.a.y, mb.pairId, mb.keyId, mb.room));
     Game.enemies.push(makeOrange(mb.b.x, mb.b.y, mb.pairId, mb.keyId, mb.room));
   }
+  for (const p of Game.levelData.enemies) Game.enemies.push(makeMazeAmbient(p.x, p.y, p.type));   // ambient corridor monsters
   const sp = Game.levelData.spawn;
   Object.assign(Game.hero, {
     x: sp.x, y: sp.y, vx: 0, vy: 0,
@@ -1266,6 +1281,16 @@ function makeOrange(x, y, pairId, keyId, room) {
 }
 // A guard only wakes (homes + attacks) once the hero steps into its room.
 function heroInRoom(room, h) { return room && h.x >= room.x0 && h.x <= room.x1 && h.y > room.y0 && h.y <= room.y1 + 4; }
+// An ambient maze monster (red/yellow/blue) that patrols its corridor on one floor tier —
+// reversing at walls; blue chases when the hero is close; yellow hops. Stomp to kill (its
+// type's hit count). Rendered in its real colour against the B&W maze.
+function makeMazeAmbient(x, y, type) {
+  return {
+    x, y, vx: 0, vy: 0, r: 7, type, side: 'ambient', dir: Game.rand() < 0.5 ? -1 : 1, baseSpeed: 26 * (ENEMY.speedMul[type] || 1),
+    onGround: false, leaping: false, alive: true, trail: [], trailT: 0, patrol: type !== 'blue', homing: type === 'blue',
+    jumpT: 0.5 + Game.rand() * 0.7, spikes: 5, gaze: -1, hits: ENEMY_HITS[type] || 1, maxHits: ENEMY_HITS[type] || 1, bloodshot: false, hitT: 0,
+  };
+}
 // Fire a mini-boss as a projectile toward the hero's current position.
 function launchMazeThrow(e, h) {
   const spd = 190, dx = h.x - e.x, dy = (h.y - h.h / 2) - e.y, d = Math.hypot(dx, dy) || 1;
@@ -1298,23 +1323,26 @@ function updateMazeEnemies(dt) {
       continue;
     }
 
-    if (!e.awake && heroInRoom(e.room, h)) e.awake = true;   // wake only when the hero enters the room
     e.vy += G * dt;
-    if (e.tele > 0) {                               // ── winding up a throw (frozen) ──
-      e.tele -= dt; e.vx = 0;
-      if (e.tele <= 0) { if (e.role === 'proj') { launchMazeThrow(e, h); continue; } e.role = 'idle'; }
-    } else if (e.awake) {                           // active: home toward the hero + count down the throw
-      if (e.onGround) { e.dir = h.x < e.x ? -1 : 1; e.vx = e.dir * (e.baseSpeed * (e.bloodshot ? ENRAGE_SPEEDUP : 1)); }
-      if (e.throwCd > 0) e.throwCd -= dt;
-    } else {                                        // dormant: stand still in the room
-      e.vx = 0;
+    if (e.side === 'maze') {                         // ── orange mini-boss: room-gated homing + throw wind-up ──
+      if (!e.awake && heroInRoom(e.room, h)) e.awake = true;
+      if (e.tele > 0) { e.tele -= dt; e.vx = 0; if (e.tele <= 0) { if (e.role === 'proj') { launchMazeThrow(e, h); continue; } e.role = 'idle'; } }
+      else if (e.awake) { if (e.onGround) { e.dir = h.x < e.x ? -1 : 1; e.vx = e.dir * (e.baseSpeed * (e.bloodshot ? ENRAGE_SPEEDUP : 1)); } if (e.throwCd > 0) e.throwCd -= dt; }
+      else e.vx = 0;                                 // dormant until you enter the room
+    } else {                                         // ── ambient monster: blue chases when near, others patrol; yellow hops ──
+      e._chasing = e.homing && Math.abs(h.x - e.x) < 160 && Math.abs(h.y - e.y) < 44;
+      if (e._chasing && e.onGround) e.dir = h.x < e.x ? -1 : 1;
+      if (e.onGround) e.vx = e.dir * (e.baseSpeed * (e.bloodshot ? ENRAGE_SPEEDUP : 1));
+      if (e.type === 'yellow' && e.onGround) { e.jumpT -= dt; if (e.jumpT <= 0) { e.vy = -ENEMY.jumpImpulse; e.onGround = false; e.jumpT = 0.9 + Game.rand() * 0.5; } }
     }
 
-    // horizontal tile collision
+    // horizontal tile collision (a patrolling ambient reverses when it hits a wall)
+    const preVx = e.vx;
     e.x += e.vx * dt;
     { const ty0 = Math.floor((e.y - e.r * 2 + 1) / T), ty1 = Math.floor((e.y - 1) / T);
       if (e.vx > 0) { const tx = Math.floor((e.x + e.r) / T); for (let ty = ty0; ty <= ty1; ty++) if (tileSolid(mz, tx, ty)) { e.x = tx * T - e.r; e.vx = 0; break; } }
       else if (e.vx < 0) { const tx = Math.floor((e.x - e.r) / T); for (let ty = ty0; ty <= ty1; ty++) if (tileSolid(mz, tx, ty)) { e.x = (tx + 1) * T + e.r; e.vx = 0; break; } } }
+    if (e.side === 'ambient' && !e._chasing && preVx !== 0 && e.vx === 0) e.dir = -e.dir;
     // vertical tile collision (feet at e.y)
     e.y += e.vy * dt; e.onGround = false;
     { const tx0 = Math.floor((e.x - e.r + 1) / T), tx1 = Math.floor((e.x + e.r - 1) / T), ty = Math.floor(e.y / T);
@@ -4265,7 +4293,7 @@ window.BS = {
   reseed,
   genTerrain, genArena, genLevel, worldForLevel, HAZARD_KINDS, HAZARDS_BY_WORLD, hazardReach, surfaceAt, findSafeX,
   genMaze, mazeSolvable, MAZE_CELLS, tileSolid, mazeSolidAt, mazeSurfaceAt, collideHeroMaze, MAZE_LEVEL, maxPlayableLevel, mazeExitReached: () => !!Game.mazeExitReached,
-  mazeKeys: () => Game.keys | 0, updateMazeInteract, updateMazeEnemies, makeOrange, minibosses: () => (Game.levelData ? Game.levelData.minibosses : []),
+  mazeKeys: () => Game.keys | 0, updateMazeInteract, updateMazeEnemies, makeOrange, makeMazeAmbient, minibosses: () => (Game.levelData ? Game.levelData.minibosses : []),
   terrain: () => Game.terrain,
   levelData: () => Game.levelData,
   phase: () => Game.phase,
