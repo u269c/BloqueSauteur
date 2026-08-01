@@ -332,6 +332,26 @@ test.describe('L6 maze — orange mini-boss pairs', () => {
     expect(r.any).toBe(true);
   });
 
+  test('a mini-boss pair spawns at opposite room edges (not clustered on the rope)', async ({ page }) => {
+    await openGame(page);
+    const r = await page.evaluate(() => {
+      const T = 16; let ok = true, checked = 0;
+      for (let s = 1; s <= 30; s++) {
+        const mz = window.BS.genMaze(6, s * 7919 >>> 0), cw = mz.cells.cw;
+        for (const mb of mz.minibosses) {
+          checked++;
+          const center = (mb.room.x0 + mb.room.x1) / 2;
+          const spread = Math.abs(mb.a.x - mb.b.x);
+          const straddles = (mb.a.x < center) !== (mb.b.x < center);   // one each side of centre (the shaft)
+          if (spread < (cw - 3.5) * T || !straddles) ok = false;
+        }
+      }
+      return { ok, checked };
+    });
+    expect(r.checked).toBeGreaterThan(0);
+    expect(r.ok).toBe(true);   // spread to the edges, straddling the shaft column
+  });
+
   test('an orange takes exactly 6 hits, is orange, and homes toward the hero', async ({ page }) => {
     await openGame(page); await enterPlayPanel(page, 0);
     const r = await page.evaluate((src) => {
