@@ -85,6 +85,17 @@ test.describe('L6 finale — the evil-hero shadow boss', () => {
     expect(r.leapt).toBe(true);
   });
 
+  test('the shadow arena spawns reinforcements from its spawn boxes', async ({ page }) => {
+    await enterShadowArena(page, 'normal');
+    const r = await page.evaluate(() => {
+      let maxAlive = 0;
+      for (let i = 0; i < 4 * 120; i++) { window.BS.step(1 / 120); maxAlive = Math.max(maxAlive, window.BS.enemies().length); }
+      return { maxAlive, boxes: window.BS.arenaBoxes() };
+    });
+    expect(r.boxes).toBeGreaterThanOrEqual(2);   // ARENA[6].boxes = 2
+    expect(r.maxAlive).toBeGreaterThan(0);        // reinforcements actually appear (the maze had frozen the spawner)
+  });
+
   test('36 stomps kill it and clear the level (one life, no revive)', async ({ page }) => {
     await enterShadowArena(page, 'normal');
     const r = await page.evaluate(() => {

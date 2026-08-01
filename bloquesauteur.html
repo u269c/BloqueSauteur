@@ -1393,6 +1393,7 @@ function enterBossArena() {
   Game.cam.x = 0; Game.cam.y = 0;   // leave the maze's 2D camera behind
   Game.enemies = [];
   Game.pickups = [];
+  Game.spawnT = (LEVELS[Game.level] || LEVELS[1]).spawnEvery * 0.5 / (MODES[Game.mode].spawnMul || 1);   // arm arena reinforcements (the L6 maze had set this to ∞)
   const sx = C.PLAT_X0 + 30, sy = surfaceAt(Game.terrain, sx) ?? C.PLAT_Y;
   Object.assign(Game.hero, {
     x: sx, y: sy, vx: 0, vy: 0,
