@@ -998,7 +998,9 @@ function placeMazeGates(P) {
     const { cx, cy } = cellOf(cell), fr = floorRowOf(cy), ktx = cx * cw + 2, mid = cx * cw + Math.floor(cw / 2);
     const room = { x0: cx * cw * T, x1: (cx + 1) * cw * T, y0: cy * ch * T, y1: (cy + 1) * ch * T };   // the guards stay dormant until you're inside it
     keys.push({ id: k, tx: ktx, ty: fr - 1, x: ktx * T + T / 2, y: fr * T, taken: false, locked: true });
-    minibosses.push({ pairId: k, keyId: k, freed: false, room, a: { x: (mid - 1) * T, y: fr * T }, b: { x: (mid + 2) * T, y: fr * T } });
+    // place the pair at the ROOM EDGES, away from the shaft/rope column (mid) — so you don't
+    // climb straight up into them; they wake and close in once you're in the room.
+    minibosses.push({ pairId: k, keyId: k, freed: false, room, a: { x: (cx * cw + 1.5) * T, y: fr * T }, b: { x: (cx * cw + cw - 1.5) * T, y: fr * T } });
   }
   return { doors, keys, minibosses };
 }
@@ -3647,7 +3649,7 @@ function drawHero() {
   ctx.globalAlpha = 1;
 }
 
-const ENEMY_COL = { clear: '#dfe6e9', red: '#e0392f', yellow: '#f4d03f', rainbow: '#fff', volcano: '#c1121f', blue: '#2a7fd0', orange: '#ff8a2c', shadow: '#20222a' };
+const ENEMY_COL = { clear: '#dfe6e9', red: '#e0392f', yellow: '#f4d03f', rainbow: '#fff', volcano: '#c1121f', blue: '#2a7fd0', orange: '#b3202f', shadow: '#20222a' };   // orange = L6 mini-boss, now dark red
 
 function drawDonut(cx, cy, r, type, spikes, gaze, alpha, phase, blood) {
   const col = ENEMY_COL[type] || '#fff';
@@ -3676,10 +3678,8 @@ function drawDonut(cx, cy, r, type, spikes, gaze, alpha, phase, blood) {
 
 function drawEnemies() {
   const phase = Game.t * 6;
-  // L6: enemies render COLOURLESS (still behave as their real type) — a stark B&W lens,
-  // in both the maze and the shadow arena (reinforcements are greyscale too).
-  const mono = shadowLevel();
-  if (mono) { ctx.save(); ctx.filter = 'grayscale(1) contrast(1.1) brightness(1.2)'; }
+  // L6 enemies render in COLOUR against the black-and-white maze — dark-red mini-bosses,
+  // red/yellow/blue ambient monsters — so the threats pop off the monochrome stone.
   for (const e of Game.enemies) {
     if (!e.alive) continue;   // never draw a defeated enemy
     // fading motion trail (longer + brighter for a thrown mini-boss)
@@ -3696,7 +3696,6 @@ function drawEnemies() {
     }
     drawDonut(e.x, e.y - e.r, e.r, e.type, e.spikes, e.gaze, 1, phase + (e.thrown ? Game.t * 40 : 0), e.bloodshot);
   }
-  if (mono) ctx.restore();
 }
 
 // The evil-hero doppelgänger: a scaled-up, blacked-out version of the hero with burning eyes.
