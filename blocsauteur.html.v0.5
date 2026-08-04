@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<title>BloqueSauteur</title>
+<title>Bloc Sauteur</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; -webkit-user-select:none; user-select:none; -webkit-tap-highlight-color:transparent; }
   html, body { width:100%; height:100%; overflow:hidden; background:#0a0a12; touch-action:none; overscroll-behavior:none; }
@@ -112,7 +112,7 @@
   </div>
 
   <div class="overlay" id="start">
-    <h1>BLOQUE&nbsp;SAUTEUR</h1>
+    <h1>BLOC&nbsp;SAUTEUR</h1>
     <p>Survive the tower. Stomp the monsters into the lava.</p>
     <div class="picker-label">Mode</div>
     <div class="modes" id="modes"></div>
@@ -359,7 +359,7 @@ const Game = {
 
 // ── Persistence (localStorage) ────────────────────────────────────
 const Save = {
-  KEY: 'bloquesauteur.save',
+  KEY: 'blocsauteur.save',
   load() {
     let d = {};
     try { d = JSON.parse(localStorage.getItem(this.KEY) || '{}') || {}; } catch (e) { d = {}; }

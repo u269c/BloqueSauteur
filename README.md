@@ -1,4 +1,4 @@
-# BloqueSauteur
+# Bloc Sauteur
 
 A retro **8-bit side-scrolling platformer** that runs as one self-contained HTML file in
 any modern browser — built for phones and iPads, playable with touch or keyboard.
@@ -19,7 +19,7 @@ maze finale where you hunt keys and face your own **shadow**.
 
 ## Play
 
-Just open **`bloquesauteur.html`** in a browser — no build step, no server, no assets, no
+Just open **`blocsauteur.html`** in a browser — no build step, no server, no assets, no
 network. On a phone/tablet, drop it on your home screen for a full-screen experience.
 
 - **Keyboard:** `←` / `→` move, `↑` (hold for height) jump, `↓` skill (see below),
@@ -120,15 +120,15 @@ Both the scrolling levels and their boss arenas are seeded (as is the L6 maze) �
 `?seed=N` (and optionally `?theme=world,sky`) to replay/share an exact layout:
 
 ```
-bloquesauteur.html?seed=12345
-bloquesauteur.html?theme=ropeBridge,thunder
+blocsauteur.html?seed=12345
+blocsauteur.html?theme=ropeBridge,thunder
 ```
 
 Progress (purchases, unlocks, best level, colour, mode) is saved per slot in your browser.
 
 ## Development
 
-Everything lives in `bloquesauteur.html` (banded sections: RNG · CONFIG · TERRAIN · MAZE ·
+Everything lives in `blocsauteur.html` (banded sections: RNG · CONFIG · TERRAIN · MAZE ·
 STATE · INPUT · AUDIO · FLOW · physics · ENEMIES · BOSS · RENDER · HUD · LOOP). L1–5 use a
 column **heightfield**; L6 adds a separate tile-grid **maze** engine (`genMaze`,
 `collideHeroMaze`, `mazeSolvable`) gated on `terrain.maze` so the older path is untouched.
