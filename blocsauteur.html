@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<title>BloqueSauteur</title>
+<title>Bloc Sauteur</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; -webkit-user-select:none; user-select:none; -webkit-tap-highlight-color:transparent; }
   html, body { width:100%; height:100%; overflow:hidden; background:#0a0a12; touch-action:none; overscroll-behavior:none; }
@@ -204,7 +204,7 @@
   </div>
 
   <div class="overlay" id="start">
-    <h1>BLOQUE&nbsp;SAUTEUR</h1>
+    <h1>BLOC&nbsp;SAUTEUR</h1>
 
     <div class="slots" id="slots"></div>
 
@@ -1160,11 +1160,12 @@ function freshSlot() {
   return { owned: { shield: false, doubleJump: false, dodge: false, strongHit: false, paddle: false, costumes: [] }, costumeIdx: -1, pickleWins: 0, rainbowUnlocked: false, colorIdx: 0, mode: 'normal', best: 0 };
 }
 const Save = {
-  KEY: 'bloquesauteur.save',
+  KEY: 'blocsauteur.save',
   data: { v: SAVE_VERSION, activeSlot: null, slots: [null, null, null], muted: false },
   load() {
     let d = null;
-    try { d = JSON.parse(localStorage.getItem(this.KEY) || 'null'); } catch (e) { d = null; }
+    // Migrate saves from the pre-rename key ('bloquesauteur.save') the first time; the next save() re-writes under the new KEY.
+    try { let raw = localStorage.getItem(this.KEY); if (raw == null) raw = localStorage.getItem('bloquesauteur.save'); d = JSON.parse(raw || 'null'); } catch (e) { d = null; }
     // Old schema (or corrupt) → wipe (effectively deletes all previous games).
     if (d && d.v === SAVE_VERSION && Array.isArray(d.slots)) this.data = { v: SAVE_VERSION, activeSlot: null, slots: [d.slots[0] || null, d.slots[1] || null, d.slots[2] || null], muted: !!d.muted };
     else this.data = { v: SAVE_VERSION, activeSlot: null, slots: [null, null, null], muted: false };

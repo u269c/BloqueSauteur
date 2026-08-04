@@ -1,7 +1,7 @@
 // @ts-check
 const path = require('path');
 
-const GAME_PATH = path.resolve(__dirname, '..', 'bloquesauteur.html');
+const GAME_PATH = path.resolve(__dirname, '..', 'blocsauteur.html');
 
 /** file:// URL for the game, optional ?seed= and other query params. */
 function gameUrl(params = {}) {
